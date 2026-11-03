@@ -4,7 +4,7 @@ import { HttpError, resolveDiner } from '@/lib/delivery/diner';
 import { closeIfDue, readCounterBids } from '@/lib/auction/auction-repository';
 import { createPostgisKitchenRepository } from '@/lib/auction/kitchen-repository';
 import { assertSandboxDispatchMode, createSandboxDispatch } from '@/lib/dispatch/sandbox';
-import { createMeshBus } from '@/lib/mesh/bus';
+import { createMeshBus, MeshBusUnavailableError, withBusDeadline } from '@/lib/mesh/bus';
 import { auctionEventsChannel } from '@/lib/mesh/geohash';
 
 export const runtime = 'nodejs';
@@ -41,16 +41,34 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
   const kitchens = createPostgisKitchenRepository(pool);
   const bus = createMeshBus();
 
+  // First bus contact happens before the response is committed, so a down bus answers 503
+  // MESH_BUS_UNAVAILABLE instead of opening a stream that never delivers. The subscription is
+  // made before the snapshot so no bid is missed. Bids are forwarded once the stream exists; no
+  // await separates the subscribe resolving from the stream being constructed.
+  const out: { controller?: ReadableStreamDefaultController<Uint8Array> } = {};
   let closed = false;
   let unsubscribe: (() => Promise<void>) | undefined;
   let tickTimer: ReturnType<typeof setInterval> | undefined;
   let pingTimer: ReturnType<typeof setInterval> | undefined;
+  const send = (event: string, data: unknown) => {
+    if (!closed) out.controller?.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+  };
+
+  try {
+    unsubscribe = await withBusDeadline(
+      bus.subscribe([auctionEventsChannel(id)], (_ch, msg) => send('bid', msg)),
+    );
+  } catch (err) {
+    void bus.close().catch(() => undefined);
+    if (err instanceof MeshBusUnavailableError) {
+      return json({ error: 'mesh bus unavailable', code: 'MESH_BUS_UNAVAILABLE' }, 503);
+    }
+    throw err;
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (event: string, data: unknown) => {
-        if (!closed) controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-      };
+      out.controller = controller;
       const cleanup = async () => {
         if (closed) return;
         closed = true;
@@ -70,7 +88,6 @@ async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> })
       req.signal.addEventListener('abort', () => void cleanup());
 
       try {
-        unsubscribe = await bus.subscribe([auctionEventsChannel(id)], (_ch, msg) => send('bid', msg));
         pingTimer = setInterval(() => {
           if (!closed) controller.enqueue(enc.encode(': ping\n\n'));
         }, PING_MS);

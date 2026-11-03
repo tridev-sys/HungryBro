@@ -74,7 +74,7 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
                   aria-label={`${n} star${n === 1 ? '' : 's'}`}
                   aria-checked={score === n}
                   onClick={() => setScore(n)}
-                  className="rounded p-1"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1"
                 >
                   <Star
                     className={n <= (score ?? 0) ? 'fill-[var(--color-sla-yellow)] text-[var(--color-sla-yellow)]' : 'text-[var(--color-text-muted)]'}
@@ -91,7 +91,7 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
                   type="button"
                   aria-pressed={tags.includes(tag)}
                   onClick={() => setTags((prev) => toggleTag(prev, tag))}
-                  className={`rounded-[var(--radius-pill)] border px-3 py-1 text-sm ${
+                  className={`inline-flex min-h-11 items-center rounded-[var(--radius-pill)] border px-3 py-1 text-sm ${
                     tags.includes(tag)
                       ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-ink)]'
                       : 'border-[var(--color-surface-2)] bg-[var(--color-surface-2)]'
@@ -108,17 +108,17 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
 
         <div className="mt-6 flex justify-end gap-3">
           {saved ? (
-            <button type="button" onClick={onClose} className="rounded-[var(--radius-pill)] bg-[var(--color-accent)] px-4 py-2 text-sm text-[var(--color-accent-ink)]">
+            <button type="button" onClick={onClose} className="min-h-11 rounded-[var(--radius-pill)] bg-[var(--color-accent)] px-4 py-2 text-sm text-[var(--color-accent-ink)]">
               Done
             </button>
           ) : (
             <>
-              <button type="button" onClick={onClose} className="px-4 py-2 text-sm">Not now</button>
+              <button type="button" onClick={onClose} className="min-h-11 px-4 py-2 text-sm">Not now</button>
               <button
                 type="button"
                 onClick={submit}
                 disabled={submitting || !canSubmitRating(score, tags)}
-                className="rounded-[var(--radius-pill)] bg-[var(--color-accent)] px-4 py-2 text-sm text-[var(--color-accent-ink)] disabled:opacity-40"
+                className="min-h-11 rounded-[var(--radius-pill)] bg-[var(--color-accent)] px-4 py-2 text-sm text-[var(--color-accent-ink)] disabled:opacity-40"
               >
                 {submitting ? 'Submitting...' : 'Submit rating'}
               </button>

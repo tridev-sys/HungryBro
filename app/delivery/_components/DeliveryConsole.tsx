@@ -6,6 +6,20 @@ import MetadataCard from './MetadataCard';
 import CounterBidList, { type BidRow } from './CounterBidList';
 import DispatchPanel, { type DispatchInfo } from './DispatchPanel';
 import { extractIntentStub, type ExtractedIntent } from '@/lib/delivery/stub-extract';
+import { LatLngSchema, type LatLng } from '@/types/food-os';
+
+// Same bounds as DeliveryIntentSchema.client_coordinates (LatLngSchema), so the console rejects
+// exactly what the API would reject with 400.
+type CoordField = 'lat' | 'lng';
+const COORD_MESSAGE: Record<CoordField, string> = {
+  lat: 'Latitude must be between -90 and 90',
+  lng: 'Longitude must be between -180 and 180',
+};
+
+function checkCoord(field: CoordField, raw: string): string | undefined {
+  if (raw.trim() === '') return undefined; // blank means "use the locality"
+  return LatLngSchema.shape[field].safeParse(Number(raw)).success ? undefined : COORD_MESSAGE[field];
+}
 
 interface Bundle {
   restaurantId: string;
@@ -32,6 +46,9 @@ export default function DeliveryConsole() {
   const [extracted, setExtracted] = useState<ExtractedIntent | null>(null);
   const [auction, setAuction] = useState<AuctionView | null>(null);
   const [now, setNow] = useState(0);
+  const [latText, setLatText] = useState('');
+  const [lngText, setLngText] = useState('');
+  const [coordErrors, setCoordErrors] = useState<Partial<Record<CoordField, string>>>({});
 
   // Live updates over SSE for the open auction.
   useEffect(() => {
@@ -79,9 +96,29 @@ export default function DeliveryConsole() {
   async function submit() {
     setError(null);
     const parsed = extractIntentStub(text);
-    setExtracted(parsed);
-    if (!parsed.client_coordinates) {
-      setError('Pick a pilot locality (Indiranagar or HSR).');
+
+    // Out-of-range coordinates are shown next to the field and never sent.
+    const latError = checkCoord('lat', latText);
+    const lngError = checkCoord('lng', lngText);
+    setCoordErrors({ lat: latError, lng: lngError });
+    if (latError || lngError) {
+      setExtracted(null);
+      return;
+    }
+
+    // Typed coordinates win when both are given; one without the other is incomplete.
+    const latTrim = latText.trim();
+    const lngTrim = lngText.trim();
+    const partial = (latTrim === '') !== (lngTrim === '');
+    const typed: LatLng | undefined = latTrim && lngTrim ? { lat: Number(latTrim), lng: Number(lngTrim) } : undefined;
+    const coords = typed ?? parsed.client_coordinates;
+    setExtracted({ ...parsed, client_coordinates: coords });
+    if (partial) {
+      setError('Enter both latitude and longitude, or leave both blank to use a locality.');
+      return;
+    }
+    if (!coords) {
+      setError('Pick a pilot locality (Indiranagar or HSR), or enter coordinates.');
       return;
     }
     if (parsed.items_requested.length === 0) {
@@ -95,7 +132,7 @@ export default function DeliveryConsole() {
       headcount: parsed.headcount,
       target_dietary_profiles: [],
       items_requested: parsed.items_requested,
-      client_coordinates: parsed.client_coordinates,
+      client_coordinates: coords,
     };
     setBusy(true);
     setAuction(null);
@@ -132,7 +169,62 @@ export default function DeliveryConsole() {
   return (
     <div className="space-y-6">
       <VoiceInput value={text} onChange={setText} onSubmit={submit} disabled={busy} />
-      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <fieldset className="grid grid-cols-2 gap-3 text-sm">
+        <legend className="col-span-2 text-[var(--color-text-muted)]">
+          Coordinates (optional, leave blank to use the locality)
+        </legend>
+        <div className="space-y-1">
+          <label htmlFor="delivery-latitude" className="block text-[var(--color-text-muted)]">Latitude</label>
+          <input
+            id="delivery-latitude"
+            type="number"
+            inputMode="decimal"
+            step="any"
+            min={-90}
+            max={90}
+            value={latText}
+            onChange={(e) => {
+              setLatText(e.target.value);
+              setCoordErrors((c) => ({ ...c, lat: undefined }));
+            }}
+            disabled={busy}
+            aria-invalid={coordErrors.lat ? true : undefined}
+            aria-describedby={coordErrors.lat ? 'delivery-latitude-error' : undefined}
+            className="min-h-[44px] w-full min-w-0 rounded-md border border-[var(--color-surface-2)] bg-[var(--color-surface)] px-3 py-2 text-[var(--color-text)]"
+          />
+          {coordErrors.lat && (
+            <p id="delivery-latitude-error" role="alert" className="text-xs text-[var(--color-sla-red)]">
+              {coordErrors.lat}
+            </p>
+          )}
+        </div>
+        <div className="space-y-1">
+          <label htmlFor="delivery-longitude" className="block text-[var(--color-text-muted)]">Longitude</label>
+          <input
+            id="delivery-longitude"
+            type="number"
+            inputMode="decimal"
+            step="any"
+            min={-180}
+            max={180}
+            value={lngText}
+            onChange={(e) => {
+              setLngText(e.target.value);
+              setCoordErrors((c) => ({ ...c, lng: undefined }));
+            }}
+            disabled={busy}
+            aria-invalid={coordErrors.lng ? true : undefined}
+            aria-describedby={coordErrors.lng ? 'delivery-longitude-error' : undefined}
+            className="min-h-[44px] w-full min-w-0 rounded-md border border-[var(--color-surface-2)] bg-[var(--color-surface)] px-3 py-2 text-[var(--color-text)]"
+          />
+          {coordErrors.lng && (
+            <p id="delivery-longitude-error" role="alert" className="text-xs text-[var(--color-sla-red)]">
+              {coordErrors.lng}
+            </p>
+          )}
+        </div>
+      </fieldset>
+      {error && <p role="alert" className="text-sm text-[var(--color-sla-red)]">{error}</p>}
       {extracted && <MetadataCard intent={extracted} />}
 
       {auction && (
@@ -165,7 +257,7 @@ export default function DeliveryConsole() {
             <p className="text-sm text-[var(--color-text)]">No kitchen matched this order.</p>
           )}
           {auction.dispatch && <DispatchPanel info={auction.dispatch} />}
-          {auction.error && <p role="alert" className="text-sm text-red-700">{auction.error}</p>}
+          {auction.error && <p role="alert" className="text-sm text-[var(--color-sla-red)]">{auction.error}</p>}
         </section>
       )}
     </div>
