@@ -1,0 +1,19 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public ONDC/Beckn documentation, paraphrased", "replace_with": "recorded sandbox response after ONDC sandbox onboarding" },
+  "context": { "domain": "ONDC:RET10", "action": "on_search", "country": "IND", "city": "std:080", "core_version": "1.2.0", "bap_id": "bap.test.invalid", "bap_uri": "https://bap.test.invalid", "bpp_id": "bpp.test.invalid", "bpp_uri": "https://bpp.test.invalid", "transaction_id": "txn-1", "message_id": "msg-1", "timestamp": "2026-11-03T12:00:00.000Z" },
+  "message": {
+    "catalog": {
+      "bpp/descriptor": { "name": "Test Kitchens" },
+      "bpp/providers": [
+        {
+          "id": "prov-blr-1",
+          "descriptor": { "name": "Nagarjuna Koramangala" },
+          "items": [
+            { "id": "item-biryani", "descriptor": { "name": "Chicken Biryani" }, "price": { "currency": "INR", "value": "349.00" }, "quantity": { "available": { "count": "12" } } },
+            { "id": "item-raita", "descriptor": { "name": "Raita" }, "price": { "currency": "INR", "value": "60.50" }, "quantity": { "available": { "count": "0" } } }
+          ]
+        }
+      ]
+    }
+  }
+}
