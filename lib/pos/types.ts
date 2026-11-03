@@ -15,8 +15,8 @@ export interface MenuItemUpsert {
 }
 
 export type PosEvent =
-  | { kind: 'menu'; items: MenuItemUpsert[]; full: boolean } // full = true for a full sync, false for a partial push
-  | { kind: 'stock'; pos_item_code: string; is_in_stock: boolean }
+  | { kind: 'menu'; items: MenuItemUpsert[]; full: boolean; occurredAtMs?: number } // full = true for a full sync, false for a partial push
+  | { kind: 'stock'; pos_item_code: string; is_in_stock: boolean; occurredAtMs?: number }
   | { kind: 'ignored'; reason: string };
 
 export class PosPayloadError extends Error {}
