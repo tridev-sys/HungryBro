@@ -106,3 +106,8 @@ These do not block engineering, and the plans will use the values below until ch
 - Pilot cities and clusters: Indiranagar, Koramangala, HSR, Bengaluru.
 - Visual design: none is specified yet; the plans will use a neutral Tailwind design until you provide direction.
 - Feature priority: the PDF roadmap order (Plan 03 dine-in before Plan 02 delivery is an option if you want the dine-in pilot first).
+
+## Decisions taken on the owner's behalf (2026-11-03)
+
+- **Leftover Docker volumes `docker_pgdata` and `docker_redisdata`:** KEPT. They hold real data (about 109 MB Postgres, a Redis dump) and deleting is irreversible. Remove only on an explicit owner request.
+- **Browser (Playwright) tests:** run inside the official Playwright container image (for example `mcr.microsoft.com/playwright`, version matched to the installed `@playwright/test`). Chromium is never installed on the host, so no sudo is needed and the host stays Docker-only.
