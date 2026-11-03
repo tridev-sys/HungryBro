@@ -22,7 +22,7 @@ async function completedOrder(diner: string, settledSqlAgo: string | null, rid?:
   return { orderId: rows[0].id as string, restaurant };
 }
 
-const input = (orderId: string, extra: object = {}) => ({ order_ref_id: orderId, rating_score: 5, review_tags: ['Fast Prep'], ...extra });
+const input = (orderId: string, extra: object = {}) => ({ order_ref_id: orderId, rating_score: 5, review_tags: ['Fast Prep' as const], ...extra });
 
 test('accepts a rating submitted immediately after settlement', async () => {
   const diner = await makeUser(pool);
