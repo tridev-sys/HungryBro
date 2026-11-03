@@ -43,7 +43,7 @@ test.describe('Journey 4: negative paths', () => {
   });
 
   test('API rejects latitude 250 with 400 and names the coordinate field', async ({ request }) => {
-    // API-level check only. No UI path can send this value (see the skipped test below).
+    // API-level check. The delivery console blocks this value before it is sent (see the UI test below).
     const res = await request.post('/api/delivery/intent', {
       headers: { cookie: `fos_session=${fixture.diner.sessionToken}` },
       data: {
@@ -65,12 +65,21 @@ test.describe('Journey 4: negative paths', () => {
     expect(JSON.stringify(body.issues)).toContain('client_coordinates');
   });
 
-  // NOT IMPLEMENTED. The delivery console has no latitude input. It builds coordinates only from the
-  // fixed locality map in lib/delivery/stub-extract.ts (Indiranagar, HSR), and on a missing locality it
-  // shows "Pick a pilot locality", never a server validation message. Looked in:
-  // app/delivery/_components/DeliveryConsole.tsx, app/delivery/_components/VoiceInput.tsx,
-  // lib/delivery/stub-extract.ts.
-  test.skip('NOT IMPLEMENTED: a delivery request with latitude 250 shows a visible rejection message', async ({ page }) => {
+  test('a delivery request with latitude 250 shows a visible rejection message and is not sent', async ({ page, context }) => {
+    await signIn(context, fixture.diner.sessionToken);
+    const sent: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('/api/delivery/intent') && req.method() === 'POST') sent.push(req.url());
+    });
     await page.goto('/delivery');
+    await page.getByPlaceholder(/Dinner for 3/).fill('Biryani under 800 in 30 mins to Indiranagar');
+    await page.getByLabel('Latitude').fill('250');
+    await page.getByLabel('Longitude').fill('77.6408');
+    await page.getByRole('button', { name: 'Find kitchens' }).click();
+
+    await expect(page.getByText('Latitude must be between -90 and 90')).toBeVisible();
+    await expect(page.getByLabel('Latitude')).toHaveAttribute('aria-invalid', 'true');
+    await shot(page, 'journey4-latitude-250');
+    expect(sent).toHaveLength(0);
   });
 });
