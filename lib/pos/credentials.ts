@@ -28,7 +28,7 @@ function isEncrypted(v: unknown): v is EncryptedCredentials {
 
 export function decryptCredentials(stored: unknown, key: Buffer): Record<string, unknown> {
   if (typeof stored === 'object' && stored !== null && Object.keys(stored).length === 0) return {};
-  if (!isEncrypted(stored)) throw new Error('pos_credentials is not in encrypted form');
+  if (!isEncrypted(stored)) throw new Error('POS credentials are not in encrypted form');
   const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(stored.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(stored.tag, 'base64'));
   const plaintext = Buffer.concat([

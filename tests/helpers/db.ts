@@ -19,13 +19,18 @@ export async function makeUser(pool: pg.Pool, role = 'diner', restaurantId: stri
   return rows[0].id;
 }
 
-// Creates a restaurant_nodes row through the owner test pool (not used by app code). Used only by tests.
-// pos_credentials is stored encrypted, as in production.
+// Creates a restaurant_nodes row and its restaurant_pos_credentials row through the admin test pool
+// (not used by app code). Credentials are stored encrypted, as in production.
 export async function createRestaurant(pool: pg.Pool, opts: { provider: string; credentials: object }): Promise<string> {
   const stored = encryptCredentials(opts.credentials as Record<string, unknown>, loadPosKey());
   const { rows } = await pool.query(
-    `INSERT INTO restaurant_nodes (slug, name, fssai_license_number, gstin, pos_provider, pos_credentials, location)
-     VALUES ($1, $1, $2, '29ABCDE1234F1Z5', $3, $4, ST_SetSRID(ST_MakePoint(77.64, 12.97), 4326)) RETURNING id`,
+    `WITH r AS (
+       INSERT INTO restaurant_nodes (slug, name, fssai_license_number, gstin, pos_provider, location)
+       VALUES ($1, $1, $2, '29ABCDE1234F1Z5', $3, ST_SetSRID(ST_MakePoint(77.64, 12.97), 4326))
+       RETURNING id, pos_provider
+     )
+     INSERT INTO restaurant_pos_credentials (restaurant_id, pos_provider, ciphertext)
+     SELECT r.id, r.pos_provider, $4::jsonb FROM r RETURNING restaurant_id AS id`,
     [`t-${randomUUID().slice(0, 8)}`, String(Math.floor(1e13 + Math.random() * 9e13)), opts.provider, JSON.stringify(stored)]);
   return rows[0].id;
 }

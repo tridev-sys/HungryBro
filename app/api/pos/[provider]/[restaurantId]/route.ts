@@ -29,15 +29,17 @@ export async function POST(
 
   try {
     const result = await asIntegration(getPool(), restaurantId, async (c) => {
-      const { rows } = await c.query(
-        'SELECT pos_provider, pos_credentials FROM restaurant_nodes WHERE id = $1',
-        [restaurantId],
-      );
+      const { rows } = await c.query('SELECT pos_provider FROM restaurant_nodes WHERE id = $1', [restaurantId]);
       if (rows.length === 0 || rows[0].pos_provider !== provider) {
         return { status: 404, body: { error: 'not_found' } };
       }
+      // food_app cannot read restaurant_pos_credentials; this function returns one row's ciphertext.
+      const { rows: credRows } = await c.query(
+        'SELECT app_pos_credentials_for_restaurant($1) AS ciphertext',
+        [restaurantId],
+      );
       // Decrypt only after the provider check, and only in this server process (shared decision 6).
-      const creds = decryptCredentials(rows[0].pos_credentials, loadPosKey());
+      const creds = decryptCredentials(credRows[0]?.ciphertext ?? {}, loadPosKey());
       const secret = typeof creds.webhook_secret === 'string' ? creds.webhook_secret : '';
       if (!adapter.verifySignature({ rawBody, headers, secret })) {
         return { status: 401, body: { error: 'unauthorized' } };
