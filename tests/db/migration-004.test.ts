@@ -1,7 +1,7 @@
-import { getPool, runMigrations, asRole } from '@/lib/db/client';
+import { getAdminPool, runMigrations, asRole } from '@/lib/db/client';
 import { makeRestaurant, makeUser, randomPhone } from '../helpers/db';
 
-const pool = getPool();
+const pool = getAdminPool();
 
 beforeAll(async () => {
   process.env.DATABASE_URL ??= 'postgres://food:change-me@localhost:5432/food_os';

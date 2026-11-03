@@ -2,15 +2,60 @@ import pg from 'pg';
 
 export { runMigrations } from './migrate';
 
-let pool: pg.Pool | undefined;
+let appPool: Promise<pg.Pool> | undefined;
 
-export function getPool(): pg.Pool {
-  if (!pool) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is not set');
-    pool = new pg.Pool({ connectionString: url });
+/**
+ * Runtime pool for request traffic. Connects with APP_DATABASE_URL, a login role that is a
+ * member of food_app (created once by db/bootstrap/002_app_login.sql). Row-level security
+ * applies to that role. The first call opens a connection and refuses a superuser, so a
+ * superuser URL fails at startup instead of silently bypassing RLS.
+ */
+export function getPool(): Promise<pg.Pool> {
+  if (!appPool) {
+    appPool = openAppPool().catch((err: unknown) => {
+      appPool = undefined;
+      throw err;
+    });
+  }
+  return appPool;
+}
+
+async function openAppPool(): Promise<pg.Pool> {
+  const url = process.env.APP_DATABASE_URL;
+  if (!url) throw new Error('APP_DATABASE_URL is not set');
+  const pool = new pg.Pool({ connectionString: url });
+  try {
+    const client = await pool.connect();
+    try {
+      const { rows } = await client.query('SELECT rolsuper FROM pg_roles WHERE rolname = current_user');
+      if (rows.length !== 1 || rows[0].rolsuper) {
+        throw new Error('APP_DATABASE_URL must log in as a non-superuser role; refusing to start');
+      }
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    await pool.end().catch(() => undefined);
+    throw err;
   }
   return pool;
+}
+
+let adminPool: pg.Pool | undefined;
+
+/**
+ * Owner pool for migrations, seed scripts, and test fixtures only. Connects with
+ * ADMIN_DATABASE_URL. Migrations need the instance owner login because CREATE EXTENSION
+ * (PostGIS) and CREATE ROLE need superuser; runMigrations then runs as food_admin.
+ * The running app never imports this helper.
+ */
+export function getAdminPool(): pg.Pool {
+  if (!adminPool) {
+    const url = process.env.ADMIN_DATABASE_URL;
+    if (!url) throw new Error('ADMIN_DATABASE_URL is not set');
+    adminPool = new pg.Pool({ connectionString: url });
+  }
+  return adminPool;
 }
 
 /**

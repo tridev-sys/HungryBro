@@ -1,10 +1,10 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { asIntegration } from '@/lib/db/integration';
 import { upsertMenu, setStock, EmptyMenuError } from '@/lib/pos/upsert';
 import { createRestaurant } from '../helpers/db';
 import type { MenuItemUpsert } from '@/lib/pos/types';
 
-const pool = getPool();
+const pool = getAdminPool();
 beforeAll(async () => { await runMigrations(pool); });
 afterAll(async () => { await pool.end(); });
 
