@@ -7,6 +7,8 @@ import { auctionEventsChannel } from '@/lib/mesh/geohash';
 import type { MeshBus } from '@/lib/mesh/bus';
 
 // Sandbox kitchens bid at list price (OWNER TO SET, row 2). Dev and test only.
+// The staff user id comes from app_restaurant_staff_ids() (migration 007): under RLS the
+// runtime role cannot read other users directly.
 export async function runSandboxKitchens(args: {
   pool: pg.Pool;
   bus: MeshBus;
@@ -17,7 +19,7 @@ export async function runSandboxKitchens(args: {
   await Promise.all(
     args.candidates.map(async (cand) => {
       const { rows } = await args.pool.query(
-        `SELECT id FROM users WHERE restaurant_id = $1 AND role = 'restaurant_staff' LIMIT 1`,
+        `SELECT id FROM app_restaurant_staff_ids($1) AS t(id) LIMIT 1`,
         [cand.restaurantId],
       );
       if (rows.length === 0) return;
