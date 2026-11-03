@@ -6,6 +6,10 @@ import { POST as razorpayPOST } from '@/app/api/webhooks/razorpay/route';
 // session cookie, and the Razorpay route answers 401 before any state change when the
 // signature is missing. Both sit behind withApiGuards.
 
+beforeAll(() => {
+  process.env.RAZORPAY_WEBHOOK_SECRET = 'test-only-webhook-secret';
+});
+
 const freshIp = () => `203.0.113.${randomUUID()}`;
 
 function ratingsReq(ip: string): Request {
