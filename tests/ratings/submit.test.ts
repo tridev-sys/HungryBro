@@ -32,6 +32,13 @@ test('accepts a rating submitted immediately after settlement', async () => {
   expect(r.ok).toBe(true);
 });
 
+test('accepts a rating submitted 1.5 seconds after settlement (inside the 2 s window)', async () => {
+  const diner = await makeUser(pool);
+  const { orderId } = await completedOrder(diner, '1500 milliseconds');
+  const r = await submitVerifiedRating(pool, diner, input(orderId));
+  expect(r.ok).toBe(true);
+});
+
 test('rejects a rating submitted 2.5 seconds after settlement (Review Focus 5)', async () => {
   const diner = await makeUser(pool);
   const { orderId } = await completedOrder(diner, '2500 milliseconds');

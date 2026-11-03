@@ -3,6 +3,7 @@ import { asRole } from '@/lib/db/client';
 import { asSession } from '@/lib/db/session';
 import { canTransition } from './session-state';
 import { issueSessionToken } from './signature';
+import { publishKdsEvent } from '@/lib/kds/events';
 import { computeSettlement, type SettlementLine } from '@/lib/settlement/split';
 import type { PaymentIntentAdapter } from '@/lib/payments/intent';
 import type { SessionStatus } from '@/types/food-os';
@@ -145,7 +146,7 @@ export async function refreshSettlement(
   if (pre.rowCount === 0) throw new Error('SESSION_NOT_FOUND');
   const dinerId = pre.rows[0].diner_user_id;
 
-  return asSession(pool, { sessionToken: input.sessionToken, userId: dinerId }, async (c) => {
+  const { closedNow, ...result } = await asSession(pool, { sessionToken: input.sessionToken, userId: dinerId }, async (c) => {
     const r = await c.query<{
       id: string; status: SessionStatus; diner_user_id: string | null; restaurant_id: string;
       bill_split_spec: { strategy: string; contributor_count: number; participants: SplitParticipant[] };
@@ -159,7 +160,7 @@ export async function refreshSettlement(
     const participants = spec.participants ?? [];
     if (session.status !== 'payment_pending') {
       const paid = participants.filter((p) => p.paid).length;
-      return { status: session.status, paidShares: paid, totalShares: participants.length };
+      return { status: session.status, paidShares: paid, totalShares: participants.length, closedNow: null };
     }
 
     for (const p of participants) {
@@ -171,6 +172,22 @@ export async function refreshSettlement(
     const { rows: st } = await c.query<{ status: SessionStatus }>(
       'SELECT app_apply_settlement_state($1, $2) AS status',
       [input.sessionToken, JSON.stringify({ ...spec, participants })]);
-    return { status: st[0].status, paidShares, totalShares: participants.length };
+    // Past the early return the session was payment_pending, so 'closed' here means this call closed it.
+    const justClosed = st[0].status === 'closed';
+    return {
+      status: st[0].status,
+      paidShares,
+      totalShares: participants.length,
+      closedNow: justClosed ? { restaurantId: session.restaurant_id, sessionId: session.id } : null,
+    };
   });
+
+  // Publish only after the commit above. A failed publish must not fail the settlement itself:
+  // the diner's next poll still sees the closed state from the database.
+  if (closedNow) {
+    const { restaurantId, sessionId } = closedNow;
+    await publishKdsEvent({ type: 'session.settled', restaurantId, sessionId })
+      .catch((err: unknown) => console.error('settlement publish failed', err instanceof Error ? err.message : 'unknown'));
+  }
+  return result;
 }
