@@ -33,13 +33,26 @@ test('food_sync can SELECT from restaurant_pos_credentials', async () => {
   expect(JSON.stringify(rows[0].ciphertext)).not.toContain('api_key');
 });
 
-test('food_app reads one restaurant ciphertext only through the SECURITY DEFINER function', async () => {
+test('the app login gets no ciphertext from the POS function outside the verified webhook path', async () => {
+  // Owner decision: only the POS webhook path (integration context for the same restaurant) reads
+  // ciphertext. Staff, diners, and an anonymous app login get NULL.
   const rid = await createRestaurant(pool, { provider: 'petpooja', credentials: { webhook_secret: 's' } });
   const { rows } = await asDbRole('food_app', 'SELECT app_pos_credentials_for_restaurant($1) AS c', [rid]);
-  expect(rows[0].c).not.toBeNull();
-  const none = await asDbRole('food_app', 'SELECT app_pos_credentials_for_restaurant($1) AS c',
-    ['00000000-0000-0000-0000-000000000000']);
-  expect(none.rows[0].c).toBeNull();
+  expect(rows[0].c).toBeNull();
+});
+
+test('a valid signed POS event on the webhook path reads the credentials through the function', async () => {
+  const { createHmac } = await import('node:crypto');
+  const { POST } = await import('@/app/api/pos/[provider]/[restaurantId]/route');
+  const secret = `pos-fn-${Date.now()}`;
+  const rid = await createRestaurant(pool, { provider: 'petpooja', credentials: { webhook_secret: secret } });
+  const body = JSON.stringify({ event: 'menu.sync', restID: 'PP-FN', categories: [
+    { categoryname: 'Mains', items: [{ itemid: `fn-${Date.now()}`, itemname: 'Dal', price: '120', instock: '1' }] }] });
+  const sig = createHmac('sha256', secret).update(body).digest('hex');
+  const res = await POST(new Request(`http://localhost:3000/api/pos/petpooja/${rid}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-petpooja-signature': sig }, body,
+  }), { params: Promise.resolve({ provider: 'petpooja', restaurantId: rid }) });
+  expect(res.status).toBe(200);
 });
 
 test('restaurant_nodes no longer has a pos_credentials column', async () => {

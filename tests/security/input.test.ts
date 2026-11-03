@@ -41,10 +41,13 @@ const ratings = (body: unknown, cookie: string) =>
   ratingsPOST(jsonRequest('http://localhost:3000/api/ratings', body, { cookie }));
 
 const countOf = async (table: string) => (await admin.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n;
+// Counts only the users this file created (buildWorld), so inserts by other suites cannot change it.
+const ownUserCount = async (): Promise<number> =>
+  (await admin.query('SELECT count(*)::int AS n FROM users WHERE id = ANY($1::uuid[])', [[w.dinerA, w.dinerB, w.staffX, w.staffY]])).rows[0].n;
 
 describe('POST /api/delivery/intent', () => {
   test.each(SQLI)('SQL injection in the transcript (%s) is stored as text, never executed', async (payload) => {
-    const usersBefore = await countOf('users');
+    const usersBefore = await ownUserCount();
     const body = { ...baseIntent(), transcript: payload };
     let status = 0;
     try {
@@ -53,7 +56,7 @@ describe('POST /api/delivery/intent', () => {
       status = 500;
     }
     expect([201, 400, 422]).toContain(status);
-    expect(await countOf('users')).toBe(usersBefore);
+    expect(await ownUserCount()).toBe(usersBefore);
   }, 60_000);
 
   test.each(SQLI)('SQL injection in an item query (%s) returns no other diner data', async (payload) => {

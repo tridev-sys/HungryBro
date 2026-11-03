@@ -1,5 +1,4 @@
 import { getAdminPool, getPool, runMigrations } from '@/lib/db/client';
-import { asSession } from '@/lib/db/session';
 import { seedDineRestaurant, seedMenu, seedStaff } from '@/tests/helpers/seed';
 import { applyCartUpdate, listSessionTickets } from '@/lib/dine/cart';
 import { refreshKitchenLoad } from '@/lib/kds/load';
@@ -96,8 +95,8 @@ test('no cart change is accepted once the session is payment_pending', async () 
   const t = await seedDineRestaurant(getAdminPool());
   const m = await seedMenu(getAdminPool(), t.restaurantId);
   await applyCartUpdate(pool, { sessionToken: t.sessionToken!, body: add(m.naan) });
-  await asSession(pool, { sessionToken: t.sessionToken! }, (c) =>
-    c.query(`UPDATE tabletop_sessions SET status = 'payment_pending' WHERE id = $1`, [t.sessionId]));
+  // Fixture: the runtime role can no longer set session status (migration 008). Admin sets the state.
+  await getAdminPool().query(`UPDATE tabletop_sessions SET status = 'payment_pending' WHERE id = $1`, [t.sessionId]);
   await expect(applyCartUpdate(pool, { sessionToken: t.sessionToken!, body: add(m.naan) }))
     .rejects.toThrow('SESSION_NOT_OPEN');
 });
