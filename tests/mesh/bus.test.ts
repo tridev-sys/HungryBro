@@ -23,3 +23,16 @@ test('publishIntentToBlock publishes to nine distinct channels around the point'
   expect(new Set(channels).size).toBe(9);
   expect(channels).toContain(meshChannel(encodeGeohash(P)));
 });
+
+// Bounded failure: a publish against a dead Redis rejects in about a second, not after
+// ioredis's default unbounded retries.
+test('publish against a closed port rejects within 2 s instead of hanging', async () => {
+  const dead = createMeshBus('redis://127.0.0.1:1');
+  const started = Date.now();
+  try {
+    await expect(dead.publish('mesh:test', { ping: true })).rejects.toBeTruthy();
+    expect(Date.now() - started).toBeLessThan(2000);
+  } finally {
+    await dead.close();
+  }
+}, 10_000);
