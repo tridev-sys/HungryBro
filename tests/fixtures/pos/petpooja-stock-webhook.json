@@ -1,0 +1,6 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Petpooja capture after partner signs" },
+  "event": "item.stock",
+  "restID": "PP-TEST-001",
+  "data": { "itemid": "pp-naan-01", "instock": "0" }
+}

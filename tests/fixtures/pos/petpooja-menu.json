@@ -1,0 +1,23 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Petpooja capture after partner signs" },
+  "event": "menu.sync",
+  "restID": "PP-TEST-001",
+  "categories": [
+    {
+      "categoryid": "cat-breads",
+      "categoryname": "Breads",
+      "items": [
+        { "itemid": "pp-naan-01", "itemname": "Butter Naan", "itemdescription": "Tandoor bread", "price": "60.00", "isveg": "1", "preparation_time": "10", "station": "Tandoor", "instock": "1", "spice_level": 0 },
+        { "itemid": "pp-garlic-02", "itemname": "Garlic Naan", "itemdescription": "", "price": "75.50", "isveg": "1", "preparation_time": "12", "station": "Tandoor", "instock": "0", "spice_level": 1 }
+      ]
+    },
+    {
+      "categoryid": "cat-curry",
+      "categoryname": "Curries",
+      "items": [
+        { "itemid": "pp-paneer-03", "itemname": "Paneer Butter Masala", "itemdescription": "Paneer in tomato gravy", "price": "260.00", "isveg": "1", "preparation_time": "18", "station": "Curry", "instock": "1", "spice_level": 2 },
+        { "itemid": "pp-chicken-04", "itemname": "Chicken Curry", "itemdescription": "", "price": "320.00", "isveg": "0", "preparation_time": "20", "station": "Curry", "instock": "1", "spice_level": 3 }
+      ]
+    }
+  ]
+}
