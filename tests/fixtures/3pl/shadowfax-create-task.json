@@ -1,0 +1,6 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Shadowfax sandbox response after partner onboarding" },
+  "id": "shadowfax-task-001",
+  "state": "ASSIGNED",
+  "eta_minutes": 14
+}

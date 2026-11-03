@@ -1,0 +1,8 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Dunzo sandbox response after partner onboarding" },
+  "task": {
+    "id": "dunzo-task-001",
+    "state": "ASSIGNED",
+    "eta": 14
+  }
+}
