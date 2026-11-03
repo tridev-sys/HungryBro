@@ -15,6 +15,6 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     globals: true,
-    setupFiles: ['tests/setup.ts'],
+    setupFiles: ['tests/setup.ts', 'tests/setup/no-network.ts'],
   },
 });
