@@ -1,0 +1,17 @@
+@theme {
+  --color-bg: #0B1A36;
+  --color-surface: #15274A;
+  --color-surface-2: #1E3461;
+  --color-text: #F5F7FB;
+  --color-text-muted: #A9B6D3;
+  --color-accent: #2EC4A0;
+  --color-accent-ink: #06201A;
+  --color-sla-green: #2EC4A0;
+  --color-sla-yellow: #F5C451;
+  --color-sla-red: #F26B6B;
+  --color-orb-a: #3BD3FF;
+  --color-orb-b: #7B61FF;
+  --color-orb-c: #FF6FB5;
+  --radius-card: 16px;
+  --radius-pill: 999px;
+}
