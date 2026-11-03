@@ -44,7 +44,7 @@ if [ "$mode" = check ]; then
   case "$BACKUP_TARGET" in
     s3://*) key=$(aws s3 ls "$base/" --region ap-south-1 | awk '{print $4}' | grep '\.tar\.gz$' | sort | tail -1)
             aws s3 cp "$base/$key" "$work/archive.tar.gz" --region ap-south-1 --only-show-errors ;;
-    file://*) key=$(ls "$base" | grep '\.tar\.gz$' | sort | tail -1)
+    file://*) key=$(cd "$base" && printf '%s\n' *.tar.gz | sort | tail -1)
               cp "$base/$key" "$work/archive.tar.gz" ;;
   esac
   test -s "$work/archive.tar.gz"
