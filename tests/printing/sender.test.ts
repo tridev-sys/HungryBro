@@ -10,7 +10,7 @@ function listen(onConn: (s: net.Socket) => void): Promise<{ srv: net.Server; por
 
 test('writes the exact bytes to the printer port and resolves', async () => {
   const received: Buffer[] = [];
-  const { srv, port } = await listen((s) => s.on('data', (d) => received.push(d)));
+  const { srv, port } = await listen((s) => s.on('data', (d: Buffer) => received.push(d)));
   const bytes = Buffer.from([0x1b, 0x40, 0x41, 0x0a, 0x1d, 0x56, 0x42, 0x00]);
   await sendToPrinter({ host: '127.0.0.1', port, bytes, timeoutMs: 2000 });
   await new Promise((r) => setTimeout(r, 50));

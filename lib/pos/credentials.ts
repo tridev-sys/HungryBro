@@ -38,7 +38,7 @@ export function decryptCredentials(stored: unknown, key: Buffer): Record<string,
   return JSON.parse(plaintext.toString('utf8')) as Record<string, unknown>;
 }
 
-export function loadPosKey(env: NodeJS.ProcessEnv = process.env): Buffer {
+export function loadPosKey(env: Partial<NodeJS.ProcessEnv> = process.env): Buffer {
   const raw = env.POS_CREDENTIALS_KEY;
   if (!raw) throw new Error('POS_CREDENTIALS_KEY is not set');
   const key = Buffer.from(raw, 'base64');
