@@ -1,0 +1,7 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Cashfree sandbox response captured under partner sign-off" },
+  "order_id": "ord-1",
+  "order_amount": 698.00,
+  "order_currency": "INR",
+  "payment_session_id": "session_TEST"
+}
