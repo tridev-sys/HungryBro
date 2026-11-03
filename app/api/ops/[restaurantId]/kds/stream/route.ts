@@ -1,7 +1,7 @@
 import { getPool } from '@/lib/db/client';
 import { resolveActor } from '@/lib/auth/actor';
 import { subscribeKdsEvents, type KdsEvent } from '@/lib/kds/events';
-import { refreshKitchenLoad } from '@/lib/kds/load';
+import { backpressureWarning, refreshKitchenLoad } from '@/lib/kds/load';
 import { loadBoard } from '@/lib/kds/board';
 
 export const runtime = 'nodejs';
@@ -32,7 +32,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ rest
   const forward = async (e: KdsEvent) => {
     try {
       const load = await refreshKitchenLoad(pool, actor.userId, restaurantId);
-      send({ type: 'load', load });
+      send({ type: 'load', load, backpressure: backpressureWarning(load) });
     } catch (err) {
       console.error('kitchen load refresh failed', err);
     }

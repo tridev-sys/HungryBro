@@ -22,12 +22,13 @@ interface TicketRow {
   bumped_at: Date | null;
 }
 
-export function toTicketView(r: TicketRow): TicketView {
+export function toTicketView(r: TicketRow, tableNumber: string | null): TicketView {
   return {
     id: r.id,
     ticketNumber: r.ticket_number,
     restaurantId: r.restaurant_id,
     sessionId: r.session_id,
+    tableNumber,
     orderModality: r.order_modality,
     station: r.station,
     status: r.status,
@@ -40,15 +41,16 @@ export function toTicketView(r: TicketRow): TicketView {
 /** Diner feed snapshot. RLS shows tickets only while the session is active. */
 export async function listSessionTickets(pool: pg.Pool, sessionToken: string): Promise<TicketView[]> {
   return asSession(pool, { sessionToken }, async (c) => {
-    const { rows } = await c.query<TicketRow>(
+    const { rows } = await c.query<TicketRow & { table_number: string }>(
       `SELECT k.id, k.ticket_number, k.restaurant_id, k.session_id, k.order_modality, k.station,
-              k.status, k.items, k.fired_at, k.bumped_at
+              k.status, k.items, k.fired_at, k.bumped_at, dt.table_number
          FROM kds_tickets k
          JOIN tabletop_sessions s ON s.id = k.session_id
+         JOIN dining_tables dt ON dt.id = s.table_id
         WHERE s.session_token = $1
         ORDER BY k.fired_at`,
       [sessionToken]);
-    return rows.map(toTicketView);
+    return rows.map((r) => toTicketView(r, r.table_number));
   });
 }
 
@@ -64,8 +66,8 @@ export async function applyCartUpdate(
   if (cart.order_type !== 'DINE_IN') throw new Error('DINE_IN_ONLY');
 
   const result = await asSession(pool, { sessionToken: input.sessionToken }, async (c) => {
-    const s = await c.query<{ id: string; status: 'active' | 'payment_pending' | 'closed' | 'abandoned'; restaurant_id: string }>(
-      `SELECT s.id, s.status, dt.restaurant_id
+    const s = await c.query<{ id: string; status: 'active' | 'payment_pending' | 'closed' | 'abandoned'; restaurant_id: string; table_number: string }>(
+      `SELECT s.id, s.status, dt.restaurant_id, dt.table_number
          FROM tabletop_sessions s JOIN dining_tables dt ON dt.id = s.table_id
         WHERE s.session_token = $1
         FOR UPDATE OF s`,
@@ -74,6 +76,7 @@ export async function applyCartUpdate(
     if (!session || !allowsCartChanges(session.status)) throw new Error('SESSION_NOT_OPEN');
     const sessionId = session.id;
     const restaurantId = session.restaurant_id;
+    const tableNumber = session.table_number;
 
     if (cart.action === 'BILL_SPLIT') {
       if (cart.items.length > 0) throw new Error('NO_ITEMS_ON_SPLIT');
@@ -158,7 +161,7 @@ export async function applyCartUpdate(
          VALUES ($1, $2, 'DINE_IN', $3, $4, $5)
          RETURNING id, ticket_number, restaurant_id, session_id, order_modality, station, status, items, fired_at, bumped_at`,
         [restaurantId, sessionId, station, status, JSON.stringify(items)]);
-      tickets.push(toTicketView(r.rows[0]));
+      tickets.push(toTicketView(r.rows[0], tableNumber));
     }
 
     // Subtotal from every line in the session, in integer paise.

@@ -16,6 +16,8 @@ export interface TicketView {
   ticketNumber: number;
   restaurantId: string;
   sessionId: string | null;
+  /** Table label for dine-in tickets (e.g. "07"); null for delivery. */
+  tableNumber: string | null;
   orderModality: 'DINE_IN' | 'DELIVERY';
   station: StationCategory;
   status: TicketStatus;

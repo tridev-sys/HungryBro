@@ -20,8 +20,18 @@ interface TicketRow {
   bumped_at: Date | null;
 }
 
-const TICKET_COLUMNS = `id, ticket_number, restaurant_id, session_id, order_modality, station,
-                        status, items, fired_at, bumped_at`;
+// Ticket columns, qualified for the join to the table of the ticket's session.
+const TICKET_COLUMNS = `k.id, k.ticket_number, k.restaurant_id, k.session_id, k.order_modality, k.station,
+                        k.status, k.items, k.fired_at, k.bumped_at`;
+const TICKET_FROM = `kds_tickets k
+  LEFT JOIN tabletop_sessions s ON s.id = k.session_id
+  LEFT JOIN dining_tables dt ON dt.id = s.table_id`;
+
+type TicketWithTable = TicketRow & { table_number: string | null };
+
+function view(r: TicketWithTable): TicketView {
+  return toTicketView(r, r.table_number);
+}
 
 function assertSameRestaurant(actor: Actor, restaurantId: string): void {
   if (actor.restaurantId !== restaurantId) throw new Error('FORBIDDEN');
@@ -37,14 +47,14 @@ export async function loadBoard(
   assertSameRestaurant(actor, restaurantId);
   await refreshKitchenLoad(pool, actor.userId, restaurantId);
   const tickets = await asRole(pool, actor.userId, async (c) => {
-    const { rows } = await c.query<TicketRow>(
-      `SELECT ${TICKET_COLUMNS} FROM kds_tickets
-        WHERE restaurant_id = $1
-          AND status IN ('queued', 'in_prep', 'ready', 'voided')
-          AND ($2::text IS NULL OR station = $2)
-        ORDER BY fired_at`,
+    const { rows } = await c.query<TicketWithTable>(
+      `SELECT ${TICKET_COLUMNS}, dt.table_number FROM ${TICKET_FROM}
+        WHERE k.restaurant_id = $1
+          AND k.status IN ('queued', 'in_prep', 'ready', 'voided')
+          AND ($2::text IS NULL OR k.station = $2)
+        ORDER BY k.fired_at`,
       [restaurantId, station ?? null]);
-    return rows.map(toTicketView);
+    return rows.map(view);
   });
   const open = tickets.filter((t) => t.status !== 'voided').length;
   const load = kdsLoad(open);
@@ -53,11 +63,17 @@ export async function loadBoard(
 
 async function lockTicket(c: pg.PoolClient, ticketId: string, restaurantId: string): Promise<TicketRow> {
   const { rows } = await c.query<TicketRow>(
-    `SELECT ${TICKET_COLUMNS} FROM kds_tickets WHERE id = $1 FOR UPDATE`, [ticketId]);
+    `SELECT ${TICKET_COLUMNS} FROM kds_tickets k WHERE k.id = $1 FOR UPDATE OF k`, [ticketId]);
   const row = rows[0];
   // RLS hides other restaurants' tickets; a missing row or a mismatched restaurant is FORBIDDEN.
   if (!row || row.restaurant_id !== restaurantId) throw new Error('FORBIDDEN');
   return row;
+}
+
+async function readTicket(c: pg.PoolClient, ticketId: string): Promise<TicketView> {
+  const { rows } = await c.query<TicketWithTable>(
+    `SELECT ${TICKET_COLUMNS}, dt.table_number FROM ${TICKET_FROM} WHERE k.id = $1`, [ticketId]);
+  return view(rows[0]);
 }
 
 export async function bumpItem(
@@ -74,10 +90,9 @@ export async function bumpItem(
     const allBumped = items.every((it, i) => i === input.itemIndex || it.bumped);
     const next = nextStatusAfterBump(row.status, allBumped);
     target.bumped = true;
-    const { rows } = await c.query<TicketRow>(
-      `UPDATE kds_tickets SET items = $2, status = $3 WHERE id = $1 RETURNING ${TICKET_COLUMNS}`,
+    await c.query(`UPDATE kds_tickets SET items = $2, status = $3 WHERE id = $1`,
       [input.ticketId, JSON.stringify(items), next]);
-    return toTicketView(rows[0]);
+    return readTicket(c, input.ticketId);
   });
   await refreshKitchenLoad(pool, actor.userId, input.restaurantId);
   return ticket;
@@ -93,11 +108,9 @@ export async function bumpTicket(
     const row = await lockTicket(c, input.ticketId, input.restaurantId);
     const next = nextStatusAfterTicketBump(row.status);
     const items = row.items.map((it) => ({ ...it, bumped: true }));
-    const { rows } = await c.query<TicketRow>(
-      `UPDATE kds_tickets SET status = $2, items = $3, bumped_at = NOW()
-        WHERE id = $1 RETURNING ${TICKET_COLUMNS}`,
+    await c.query(`UPDATE kds_tickets SET status = $2, items = $3, bumped_at = NOW() WHERE id = $1`,
       [input.ticketId, next, JSON.stringify(items)]);
-    return toTicketView(rows[0]);
+    return readTicket(c, input.ticketId);
   });
   await refreshKitchenLoad(pool, actor.userId, input.restaurantId);
   return ticket;
