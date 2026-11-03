@@ -1,3 +1,4 @@
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool, asRole } from '@/lib/db/client';
 import { HttpError, resolveDiner } from '@/lib/delivery/diner';
 import { closeIfDue, readCounterBids } from '@/lib/auction/auction-repository';
@@ -19,7 +20,7 @@ const json = (body: unknown, status: number) =>
 // Event contract: snapshot (first), bid (per counter-bid), status (on change),
 // dispatch (once, after award, with the handshake token for this diner only), and
 // a ': ping' comment every 15 s. Subscribes before the snapshot so no bid is missed.
-export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await ctx.params;
   const pool = await getPool();
 
@@ -140,3 +141,5 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     },
   });
 }
+
+export const GET = withApiGuards(handleGet, { sessionToken: publicSessionToken });

@@ -2,6 +2,8 @@ import { LIMITS } from '@/lib/ratelimit/limits';
 import { bucketKeyForIp, bucketKeyForSession, clientIpFromHeaders } from '@/lib/ratelimit/keys';
 import { RedisRateLimitStore } from '@/lib/ratelimit/redis-store';
 import { getRedis } from '@/lib/redis';
+import { readSessionToken } from '@/lib/auth/session';
+import { readTableSessionToken } from '@/lib/dine/cookie';
 import { enforceDeclaredLength, PayloadTooLargeError } from './body';
 import { withSecurityHeaders } from './security';
 
@@ -31,6 +33,15 @@ export async function guardRateLimit(
   );
 }
 
+/**
+ * The session-bucket key for every public route: the diner or staff session cookie, or the
+ * table session cookie. Returns null for anonymous requests, which then use only the IP bucket.
+ */
+export function publicSessionToken(req: Request): string | null {
+  const cookie = req.headers.get('cookie');
+  return readSessionToken(cookie) ?? readTableSessionToken(cookie);
+}
+
 let sharedStore: RedisRateLimitStore | undefined;
 
 function defaultStore(): RedisRateLimitStore {
@@ -49,16 +60,16 @@ export interface ApiGuardOptions {
  * Wraps an /api route handler. Order: declared-length check, rate limit, handler.
  * Every response gets SECURITY_HEADERS. PayloadTooLargeError maps to 413.
  */
-export function withApiGuards<C>(
-  handler: (req: Request, ctx: C) => Promise<Response>,
+export function withApiGuards<H extends (req: Request, ctx: never) => Promise<Response>>(
+  handler: H,
   opts: ApiGuardOptions = {},
-): (req: Request, ctx: C) => Promise<Response> {
-  return async (req, ctx) => {
+): H {
+  const wrapped = async (req: Request, ctx?: unknown): Promise<Response> => {
     try {
       enforceDeclaredLength(req.headers);
       const limited = await guardRateLimit(req, opts.store ?? defaultStore(), opts.sessionToken?.(req) ?? null);
       if (limited) return withSecurityHeaders(limited);
-      return withSecurityHeaders(await handler(req, ctx));
+      return withSecurityHeaders(await handler(req, ctx as never));
     } catch (err) {
       if (err instanceof PayloadTooLargeError) {
         return withSecurityHeaders(Response.json({ error: 'payload_too_large' }, { status: 413 }));
@@ -66,4 +77,6 @@ export function withApiGuards<C>(
       throw err;
     }
   };
+  // Same signature as the handler, so Next's route type checks and existing one-argument calls both hold.
+  return wrapped as unknown as H;
 }

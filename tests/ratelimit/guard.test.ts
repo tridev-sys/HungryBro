@@ -63,7 +63,7 @@ describe('withApiGuards body limit', () => {
       body,
       duplex: 'half',
     } as RequestInit);
-    const res = await handler(req, {});
+    const res = await handler(req);
     expect(res.status).toBe(413);
     expect(res.headers.get('x-frame-options')).toBe('DENY');
   });

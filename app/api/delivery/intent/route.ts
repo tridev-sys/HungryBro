@@ -1,3 +1,4 @@
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool } from '@/lib/db/client';
 import { HttpError, resolveDiner } from '@/lib/delivery/diner';
 import { DeliveryRequestSchema } from '@/lib/delivery/request';
@@ -13,7 +14,7 @@ export const dynamic = 'force-dynamic';
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-export async function POST(req: Request): Promise<Response> {
+async function handlePost(req: Request): Promise<Response> {
   const pool = await getPool();
   let dinerId: string;
   try {
@@ -52,3 +53,5 @@ export async function POST(req: Request): Promise<Response> {
     201,
   );
 }
+
+export const POST = withApiGuards(handlePost, { sessionToken: publicSessionToken });

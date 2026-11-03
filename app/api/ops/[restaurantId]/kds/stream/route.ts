@@ -1,3 +1,4 @@
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool } from '@/lib/db/client';
 import { resolveActor } from '@/lib/auth/actor';
 import { subscribeKdsEvents, type KdsEvent } from '@/lib/kds/events';
@@ -10,7 +11,7 @@ export const dynamic = 'force-dynamic';
 const HEARTBEAT_MS = 15_000;
 const STAFF_ROLES = ['restaurant_staff', 'kitchen_lead'];
 
-export async function GET(request: Request, { params }: { params: Promise<{ restaurantId: string }> }) {
+async function handleGet(request: Request, { params }: { params: Promise<{ restaurantId: string }> }) {
   const { restaurantId } = await params;
   const pool = await getPool();
   const actor = await resolveActor(pool, request.headers.get('cookie'));
@@ -79,3 +80,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ rest
     },
   });
 }
+
+export const GET = withApiGuards(handleGet, { sessionToken: publicSessionToken });
