@@ -39,14 +39,15 @@ export type CartUpdate = z.infer<typeof CartUpdateSchema>;
 
 export const DeliveryIntentSchema = z.object({
   modality: z.literal('DELIVERY'),
-  budget_ceiling_inr: z.number().positive(),
+  // Ceiling keeps the value inside NUMERIC(10,2) and well above any realistic order (INR).
+  budget_ceiling_inr: z.number().positive().max(100000),
   sla_max_minutes: z.number().int().min(15).max(120),
   headcount: z.number().int().min(1).default(1),
   target_dietary_profiles: z.array(z.string()),
   items_requested: z.array(z.object({
-    query: z.string(),
+    query: z.string().max(100),
     serving_target: z.number().default(1)
-  })),
+  })).max(20),
   client_coordinates: LatLngSchema
 });
 export type DeliveryIntent = z.infer<typeof DeliveryIntentSchema>;
