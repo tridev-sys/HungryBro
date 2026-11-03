@@ -1,6 +1,7 @@
 import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool } from '@/lib/db/client';
 import { HttpError, resolveDiner } from '@/lib/delivery/diner';
+import { readJsonBody } from '@/lib/security/body';
 import { DeliveryRequestSchema } from '@/lib/delivery/request';
 import { createAuction, readCounterBids } from '@/lib/auction/auction-repository';
 import { createPostgisKitchenRepository } from '@/lib/auction/kitchen-repository';
@@ -24,12 +25,9 @@ async function handlePost(req: Request): Promise<Response> {
     throw err;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return json({ error: 'body must be JSON' }, 400);
-  }
+  const read = await readJsonBody(req);
+  if (!read.ok) return json({ error: read.error }, read.status);
+  const body = read.body;
   const parsed = DeliveryRequestSchema.safeParse(body);
   if (!parsed.success) return json({ error: 'invalid request', issues: parsed.error.issues }, 400);
   const { transcript, intent } = parsed.data;
