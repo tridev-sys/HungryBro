@@ -101,7 +101,7 @@ test('rating insert allowed for the diner on their completed order', async () =>
     rid = await restaurant(c, `r-done-${tag}`);
     diner = await user(c, 'diner');
     const { rows } = await c.query(
-      `INSERT INTO order_refs (restaurant_id, diner_user_id, status) VALUES ($1, $2, 'completed') RETURNING id`, [rid, diner]);
+      `INSERT INTO order_refs (restaurant_id, diner_user_id, status, settled_at) VALUES ($1, $2, 'completed', NOW()) RETURNING id`, [rid, diner]);
     orderId = rows[0].id;
   } finally { c.release(); }
   await asRole(pool, diner!, (cl) =>
