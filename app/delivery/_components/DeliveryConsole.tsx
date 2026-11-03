@@ -138,8 +138,8 @@ export default function DeliveryConsole() {
       {auction && (
         <section className="space-y-4">
           <div className="flex items-baseline justify-between">
-            <h2 className="font-medium text-neutral-900">Live counter-bids</h2>
-            <span className="font-mono text-sm text-neutral-700" aria-live="polite">
+            <h2 className="font-medium text-[var(--color-text)]">Live counter-bids</h2>
+            <span className="font-mono text-sm text-[var(--color-text)]" aria-live="polite">
               {windowOver ? 'Window closed' : `${Math.ceil(remainingMs / 1000)}s left`}
             </span>
           </div>
@@ -147,22 +147,22 @@ export default function DeliveryConsole() {
 
           {windowOver && auction.bundles.length > 0 && (
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-md border border-neutral-900 p-3">
-                <p className="text-neutral-500">Winning Match</p>
-                <p className="font-medium text-neutral-900">{auction.bundles[0].name}</p>
-                <p className="text-neutral-700">₹{auction.bundles[0].offeredPriceInr}</p>
+              <div className="rounded-md border border-[var(--color-accent)] p-3">
+                <p className="text-[var(--color-text-muted)]">Winning Match</p>
+                <p className="font-medium text-[var(--color-text)]">{auction.bundles[0].name}</p>
+                <p className="text-[var(--color-text)]">₹{auction.bundles[0].offeredPriceInr}</p>
               </div>
               {auction.bundles[1] && (
-                <div className="rounded-md border border-neutral-300 p-3">
-                  <p className="text-neutral-500">Runner Up</p>
-                  <p className="font-medium text-neutral-900">{auction.bundles[1].name}</p>
-                  <p className="text-neutral-700">₹{auction.bundles[1].offeredPriceInr}</p>
+                <div className="rounded-md border border-[var(--color-surface-2)] p-3">
+                  <p className="text-[var(--color-text-muted)]">Runner Up</p>
+                  <p className="font-medium text-[var(--color-text)]">{auction.bundles[1].name}</p>
+                  <p className="text-[var(--color-text)]">₹{auction.bundles[1].offeredPriceInr}</p>
                 </div>
               )}
             </div>
           )}
           {windowOver && auction.bundles.length === 0 && (
-            <p className="text-sm text-neutral-700">No kitchen matched this order.</p>
+            <p className="text-sm text-[var(--color-text)]">No kitchen matched this order.</p>
           )}
           {auction.dispatch && <DispatchPanel info={auction.dispatch} />}
           {auction.error && <p role="alert" className="text-sm text-red-700">{auction.error}</p>}

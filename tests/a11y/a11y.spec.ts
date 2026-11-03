@@ -17,7 +17,14 @@ async function open(page: Page, url: string) {
   await page.waitForLoadState('networkidle');
 }
 
-async function runAxe(page: Page) {
+interface AxeViolation {
+  id: string;
+  impact: string | null;
+  help: string;
+  nodes: string[];
+}
+
+async function runAxe(page: Page): Promise<AxeViolation[]> {
   await page.addScriptTag({ path: AXE_PATH });
   return page.evaluate(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
