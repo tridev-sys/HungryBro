@@ -111,18 +111,8 @@ export async function closeIfDue(
 
     const intent = a.raw_intent_payload as DeliveryIntent;
     const candidates = await matchKitchenNodes(deps.kitchens, intent);
-    const { rows: bidRows } = await c.query(
-      `SELECT restaurant_id, offered_price_inr::float8 AS offered_price_inr,
-              estimated_prep_minutes, bundle_contents
-         FROM auction_counter_bids WHERE auction_id = $1`,
-      [auctionId],
-    );
-    const bids: CounterBid[] = bidRows.map((b) => ({
-      restaurantId: b.restaurant_id,
-      offeredPriceInr: b.offered_price_inr,
-      estimatedPrepMinutes: b.estimated_prep_minutes,
-      bundleContents: b.bundle_contents as MatchedLine[],
-    }));
+    // Bids are read on the same connection, so the diner's own rows are visible.
+    const bids = await readCounterBidsOn(c, auctionId);
     const [winner] = evaluateCounterBids(candidates, bids, a.budget);
 
     if (!winner) {
@@ -162,4 +152,25 @@ export async function closeIfDue(
       dispatch: { provider: task.provider, trackingRef: task.providerTaskId },
     };
   });
+}
+
+// Counter-bids on an auction, read as the owning diner (counter_bids_diner_read).
+export async function readCounterBids(pool: pg.Pool, dinerId: string, auctionId: string): Promise<CounterBid[]> {
+  return asRole(pool, dinerId, (c) => readCounterBidsOn(c, auctionId));
+}
+
+async function readCounterBidsOn(c: pg.PoolClient, auctionId: string): Promise<CounterBid[]> {
+  const { rows } = await c.query(
+    `SELECT restaurant_id, offered_price_inr::float8 AS offered_price_inr,
+            estimated_prep_minutes, bundle_contents
+       FROM auction_counter_bids WHERE auction_id = $1
+      ORDER BY submitted_at`,
+    [auctionId],
+  );
+  return rows.map((b) => ({
+    restaurantId: b.restaurant_id,
+    offeredPriceInr: b.offered_price_inr,
+    estimatedPrepMinutes: b.estimated_prep_minutes,
+    bundleContents: b.bundle_contents as MatchedLine[],
+  }));
 }
