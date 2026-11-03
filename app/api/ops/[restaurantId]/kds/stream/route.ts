@@ -1,19 +1,14 @@
 import { getPool } from '@/lib/db/client';
-import { resolveActor, type Actor } from '@/lib/auth/actor';
+import { resolveActor } from '@/lib/auth/actor';
 import { subscribeKdsEvents, type KdsEvent } from '@/lib/kds/events';
 import { refreshKitchenLoad } from '@/lib/kds/load';
-import type { TicketView } from '@/lib/kds/ticket-view';
+import { loadBoard } from '@/lib/kds/board';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const HEARTBEAT_MS = 15_000;
 const STAFF_ROLES = ['restaurant_staff', 'kitchen_lead'];
-
-/** Open tickets for the board. Replaced by loadBoard in Plan 03 Task 9. */
-async function snapshot(_actor: Actor, _restaurantId: string): Promise<{ tickets: TicketView[] }> {
-  return { tickets: [] };
-}
 
 export async function GET(request: Request, { params }: { params: Promise<{ restaurantId: string }> }) {
   const { restaurantId } = await params;
@@ -49,7 +44,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ rest
     if (!live) buffer.push(e);
     else chain = chain.then(() => forward(e));
   });
-  const initial = await snapshot(actor, restaurantId);
+  const initial = await loadBoard(pool, actor, restaurantId);
 
   const cleanup = async () => {
     if (heartbeat) clearInterval(heartbeat);
