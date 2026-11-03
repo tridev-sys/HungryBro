@@ -109,6 +109,23 @@ async function main(): Promise<void> {
   const staffA = await user('restaurant_staff', dine.id);
   const staffB = await user('restaurant_staff', other.id);
 
+  // Journey 5 (rating): table 3 has a settled session with a completed order owned by `rater`.
+  // `bystander` is a second signed-in diner with no order at that table. The settlement is stamped
+  // at seed time, so the 2-second rating window has closed by the time the journey runs.
+  const rater = await user('diner', null);
+  const bystander = await user('diner', null);
+  const ratingTableToken = randomBytes(32).toString('hex');
+  const { rows: ratingTable } = await admin.query(
+    'SELECT id FROM dining_tables WHERE restaurant_id = $1 AND table_number = $2', [dine.id, '3']);
+  const { rows: ratingSession } = await admin.query(
+    `INSERT INTO tabletop_sessions (table_id, session_token, status, diner_user_id, subtotal, total_amount, closed_at)
+     VALUES ($1, $2, 'closed', $3, 400, 420, NOW()) RETURNING id`,
+    [ratingTable[0].id, ratingTableToken, rater.id]);
+  await admin.query(
+    `INSERT INTO order_refs (restaurant_id, diner_user_id, session_id, status, settled_at)
+     VALUES ($1, $2, $3, 'completed', NOW())`,
+    [dine.id, rater.id, ratingSession[0].id]);
+
   const fixture = {
     run,
     dine: { restaurantId: dine.id, name: dine.name, tables },
@@ -121,6 +138,12 @@ async function main(): Promise<void> {
     diner: { id: diner.id, sessionToken: diner.token },
     staffA: { id: staffA.id, sessionToken: staffA.token },
     staffB: { id: staffB.id, sessionToken: staffB.token },
+    rating: {
+      tableNumber: '3',
+      tableSessionToken: ratingTableToken,
+      raterSessionToken: rater.token,
+      bystanderSessionToken: bystander.token,
+    },
   };
   writeFileSync(FIXTURE_PATH, JSON.stringify(fixture), { mode: 0o600 });
   await admin.end();

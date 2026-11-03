@@ -7,6 +7,7 @@ import { MenuList } from '@/components/dine/MenuList';
 import { BillSplitSelector } from '@/components/dine/BillSplitSelector';
 import { DynamicUpiQrModal, type UpiShare } from '@/components/dine/DynamicUpiQrModal';
 import { TableSessionGate } from '@/components/dine/TableSessionGate';
+import { RatingModal } from '@/components/ratings/RatingModal';
 import type { TicketCardProps } from '@/components/kds/TicketCard';
 import { slaColor } from '@/lib/kds/timers';
 import type { TicketView } from '@/lib/kds/ticket-view';
@@ -30,6 +31,8 @@ export interface DineSurfaceProps {
   session: DineSessionView | null;
   tickets: TicketView[];
   menu: MenuCard[];
+  /** A completed order of this session the signed-in diner can rate, or null (no prompt). */
+  ratingOrderRefId: string | null;
 }
 
 const ALLERGENS: AllergenTag[] = ['peanut', 'shellfish', 'dairy', 'gluten'];
@@ -61,6 +64,7 @@ export function DineSurface(props: DineSurfaceProps) {
   const [nowMs, setNowMs] = useState<number | null>(null);
   const [level, setLevel] = useState(0);
   const [line, setLine] = useState(0);
+  const [ratingOpen, setRatingOpen] = useState(true);
   const sessionOpen = props.session !== null && props.session.status === 'active';
   const paying = props.session?.status === 'payment_pending';
 
@@ -210,6 +214,13 @@ export function DineSurface(props: DineSurfaceProps) {
         menu={menuPanel}
       />
       {shares && qrOpen ? <DynamicUpiQrModal shares={shares} onClose={() => setQrOpen(false)} /> : null}
+      {props.ratingOrderRefId && ratingOpen ? (
+        <RatingModal
+          orderRefId={props.ratingOrderRefId}
+          restaurantName={props.restaurantName}
+          onClose={() => setRatingOpen(false)}
+        />
+      ) : null}
     </>
   );
 }
