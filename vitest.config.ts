@@ -2,6 +2,9 @@ import { defineConfig } from 'vitest/config';
 import path from 'node:path';
 
 export default defineConfig({
+  oxc: {
+    jsx: { runtime: 'automatic' },
+  },
   resolve: {
     alias: [
       { find: /^server-only$/, replacement: path.resolve(__dirname, 'node_modules/server-only/empty.js') },
@@ -10,7 +13,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     globals: true,
+    setupFiles: ['tests/setup.ts'],
   },
 });
