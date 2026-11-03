@@ -18,7 +18,7 @@ function Message({ children }: { children: string }) {
 export default async function KdsPage({ params }: { params: Promise<{ restaurantId: string }> }) {
   const { restaurantId } = await params;
   if (!UUID_RE.test(restaurantId)) notFound();
-  const pool = getPool();
+  const pool = await getPool();
   const actor = await resolveActor(pool, (await cookies()).toString());
   if (!actor) return <Message>Sign in required.</Message>;
   if (actor.restaurantId !== restaurantId || !STAFF_ROLES.includes(actor.role)) {

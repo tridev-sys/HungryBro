@@ -29,8 +29,8 @@ async function currentSessionToken(): Promise<string | null> {
 
 export async function openTableSessionAction(input: unknown): Promise<{ ok: true; status: string }> {
   const parsed = OpenSchema.parse(input);
-  const actor = await resolveActor(getPool(), (await cookies()).toString());
-  const session = await openTableSession(getPool(), {
+  const actor = await resolveActor(await getPool(), (await cookies()).toString());
+  const session = await openTableSession(await getPool(), {
     ...parsed,
     userId: actor?.role === 'diner' ? actor.userId : null,
   });
@@ -44,17 +44,17 @@ export async function requestSplitAction(input: unknown) {
   const parsed = SplitSchema.parse(input);
   const token = await currentSessionToken();
   if (!token) throw new Error('SESSION_NOT_OPEN');
-  return requestSplit(getPool(), getPaymentAdapter(), { sessionToken: token, ...parsed });
+  return requestSplit(await getPool(), getPaymentAdapter(), { sessionToken: token, ...parsed });
 }
 
 export async function refreshSettlementAction() {
   const token = await currentSessionToken();
   if (!token) throw new Error('SESSION_NOT_OPEN');
-  return refreshSettlement(getPool(), getPaymentAdapter(), { sessionToken: token });
+  return refreshSettlement(await getPool(), getPaymentAdapter(), { sessionToken: token });
 }
 
 export async function cartUpdateAction(body: unknown) {
   const token = await currentSessionToken();
   if (!token) throw new Error('SESSION_NOT_OPEN');
-  return applyCartUpdate(getPool(), { sessionToken: token, body });
+  return applyCartUpdate(await getPool(), { sessionToken: token, body });
 }

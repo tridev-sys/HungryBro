@@ -1,4 +1,4 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, getPool, runMigrations } from '@/lib/db/client';
 import { seedDineRestaurant, seedMenu, seedStaff } from '@/tests/helpers/seed';
 import { applyCartUpdate } from '@/lib/dine/cart';
 import { issueSession } from '@/lib/auth/session';
@@ -6,9 +6,9 @@ import type { UserRole } from '@/types/food-os';
 import { GET as staffStream } from '@/app/api/ops/[restaurantId]/kds/stream/route';
 import { GET as dineStream } from '@/app/api/dine/stream/route';
 
-const pool = getPool();
+const pool = await getPool();
 beforeAll(async () => {
-  await runMigrations(pool);
+  await runMigrations(getAdminPool());
   process.env.AUTH_JWT_SECRET = 'test-only-secret-that-is-at-least-32-chars';
 });
 afterAll(async () => { await pool.end(); });
@@ -34,9 +34,9 @@ async function readUntil(body: ReadableStream<Uint8Array>, needle: string, ms = 
 }
 
 test('staff stream of the same restaurant sends a snapshot and then the fired ticket', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
-  const staff = await seedStaff(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
+  const staff = await seedStaff(getAdminPool(), t.restaurantId);
   const res = await staffStream(
     new Request(`http://x/api/ops/${t.restaurantId}/kds/stream`, { headers: { cookie: await cookieFor(staff, 'restaurant_staff') } }),
     { params: Promise.resolve({ restaurantId: t.restaurantId }) });
@@ -49,9 +49,9 @@ test('staff stream of the same restaurant sends a snapshot and then the fired ti
 });
 
 test('a staff member of another restaurant gets 403', async () => {
-  const x = await seedDineRestaurant(pool);
-  const y = await seedDineRestaurant(pool);
-  const staff = await seedStaff(pool, x.restaurantId);
+  const x = await seedDineRestaurant(getAdminPool());
+  const y = await seedDineRestaurant(getAdminPool());
+  const staff = await seedStaff(getAdminPool(), x.restaurantId);
   const res = await staffStream(
     new Request('http://x', { headers: { cookie: await cookieFor(staff, 'restaurant_staff') } }),
     { params: Promise.resolve({ restaurantId: y.restaurantId }) });
@@ -59,21 +59,21 @@ test('a staff member of another restaurant gets 403', async () => {
 });
 
 test('a request without a signed-in user gets 401', async () => {
-  const x = await seedDineRestaurant(pool);
+  const x = await seedDineRestaurant(getAdminPool());
   const res = await staffStream(new Request('http://x'), { params: Promise.resolve({ restaurantId: x.restaurantId }) });
   expect(res.status).toBe(401);
 });
 
 test('the diner stream forwards only its own session events', async () => {
-  const mine = await seedDineRestaurant(pool);
-  const theirs = await seedDineRestaurant(pool, { withSession: true });
-  const m = await seedMenu(pool, mine.restaurantId);
+  const mine = await seedDineRestaurant(getAdminPool());
+  const theirs = await seedDineRestaurant(getAdminPool(), { withSession: true });
+  const m = await seedMenu(getAdminPool(), mine.restaurantId);
   const res = await dineStream(new Request('http://x/api/dine/stream', {
     headers: { cookie: `fos_table_session=${mine.sessionToken}` } }));
   expect(res.status).toBe(200);
   const pending = readUntil(res.body!, `"sessionId":"${mine.sessionId}"`);
   await applyCartUpdate(pool, { sessionToken: theirs.sessionToken!, body: { order_type: 'DINE_IN', action: 'ADD',
-    items: [{ item_id: (await seedMenu(pool, theirs.restaurantId)).naan, name: 'Naan', quantity: 1 }] } });
+    items: [{ item_id: (await seedMenu(getAdminPool(), theirs.restaurantId)).naan, name: 'Naan', quantity: 1 }] } });
   await applyCartUpdate(pool, { sessionToken: mine.sessionToken!, body: { order_type: 'DINE_IN', action: 'ADD',
     items: [{ item_id: m.naan, name: 'Naan', quantity: 1 }] } });
   const text = await pending;

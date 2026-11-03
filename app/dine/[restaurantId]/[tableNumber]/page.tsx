@@ -26,7 +26,7 @@ export default async function DinePage({
   if (!UUID_RE.test(restaurantId)) notFound();
   const signature = typeof sig === 'string' && SIG_RE.test(sig) ? sig : null;
 
-  const pool = getPool();
+  const pool = await getPool();
   const restaurant = await pool.query<{ name: string; rating: number; verified: number }>(
     `SELECT name, rating_aggregate::float8 AS rating, total_verified_reviews AS verified
        FROM restaurant_nodes WHERE id = $1`,

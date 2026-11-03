@@ -12,7 +12,7 @@ const STAFF_ROLES = ['restaurant_staff', 'kitchen_lead'];
 
 export async function GET(request: Request, { params }: { params: Promise<{ restaurantId: string }> }) {
   const { restaurantId } = await params;
-  const pool = getPool();
+  const pool = await getPool();
   const actor = await resolveActor(pool, request.headers.get('cookie'));
   if (!actor) return new Response('Unauthorized', { status: 401 });
   if (actor.restaurantId !== restaurantId || !STAFF_ROLES.includes(actor.role)) {

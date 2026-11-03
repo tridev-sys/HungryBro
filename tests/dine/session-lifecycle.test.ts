@@ -1,22 +1,22 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, getPool, runMigrations } from '@/lib/db/client';
 import { asSession } from '@/lib/db/session';
 import { seedDineRestaurant, seedMenu } from '@/tests/helpers/seed';
 import { openTableSession, requestSplit, refreshSettlement } from '@/lib/dine/repository';
 import { FakePaymentIntentAdapter } from '@/lib/payments/fake';
 
-const pool = getPool();
+const pool = await getPool();
 const adapter = new FakePaymentIntentAdapter();
-beforeAll(async () => { await runMigrations(pool); });
+beforeAll(async () => { await runMigrations(getAdminPool()); });
 afterAll(async () => { await pool.end(); });
 
 async function addLine(sessionId: string, restaurantId: string, menuItemId: string, station: string, name: string, price: number) {
-  await pool.query(
+  await getAdminPool().query(
     `INSERT INTO tabletop_order_lines (session_id, restaurant_id, menu_item_id, station, name, unit_price, quantity)
      VALUES ($1, $2, $3, $4, $5, $6, 1)`, [sessionId, restaurantId, menuItemId, station, name, price]);
 }
 
 test('opening the same table twice returns the same active session', async () => {
-  const t = await seedDineRestaurant(pool, { withSession: false });
+  const t = await seedDineRestaurant(getAdminPool(), { withSession: false });
   const input = { restaurantId: t.restaurantId, tableNumber: t.tableNumber, signature: t.signature };
   const first = await openTableSession(pool, input);
   const second = await openTableSession(pool, input);
@@ -26,15 +26,15 @@ test('opening the same table twice returns the same active session', async () =>
 });
 
 test('a wrong table signature is rejected (Review Focus 2)', async () => {
-  const t = await seedDineRestaurant(pool, { withSession: false });
+  const t = await seedDineRestaurant(getAdminPool(), { withSession: false });
   await expect(openTableSession(pool, {
     restaurantId: t.restaurantId, tableNumber: t.tableNumber, signature: '1'.repeat(32),
   })).rejects.toThrow('INVALID_SIGNATURE');
 });
 
 test('a split request moves the session to payment_pending with one UPI intent per share', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   await addLine(t.sessionId!, t.restaurantId, m.paneerTikka, 'Tandoor', 'Paneer Tikka', 400);
   await addLine(t.sessionId!, t.restaurantId, m.naan, 'Tandoor', 'Naan', 60);
   await addLine(t.sessionId!, t.restaurantId, m.lassi, 'Pantry', 'Lassi', 80);
@@ -44,13 +44,13 @@ test('a split request moves the session to payment_pending with one UPI intent p
   expect(r.total).toBe(567);
   expect(r.shares.map((s) => s.amount)).toEqual([283.5, 283.5]);
   expect(r.shares[0].upiUri).toContain('am=283.50');
-  const { rows } = await pool.query(`SELECT status FROM tabletop_sessions WHERE id = $1`, [t.sessionId]);
+  const { rows } = await getAdminPool().query(`SELECT status FROM tabletop_sessions WHERE id = $1`, [t.sessionId]);
   expect(rows[0].status).toBe('payment_pending');
 });
 
 test('the session closes only after every share settles, and a closed session cannot reopen', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   await addLine(t.sessionId!, t.restaurantId, m.lassi, 'Pantry', 'Lassi', 80);
   const r = await requestSplit(pool, adapter, { sessionToken: t.sessionToken!, strategy: 'EQUAL', contributorCount: 2 });
   adapter.settle(r.shares[0].intentId);

@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   const token = readTableSessionToken(request.headers.get('cookie'));
   if (!token) return new Response('Unauthorized', { status: 401 });
 
-  const pool = getPool();
+  const pool = await getPool();
   const found = await asSession(pool, { sessionToken: token }, (c) =>
     c.query<{ id: string; restaurant_id: string }>(
       `SELECT s.id, dt.restaurant_id

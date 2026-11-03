@@ -1,11 +1,11 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, getPool, runMigrations } from '@/lib/db/client';
 import { asSession } from '@/lib/db/session';
 import { seedDineRestaurant, seedMenu, seedStaff } from '@/tests/helpers/seed';
 import { applyCartUpdate, listSessionTickets } from '@/lib/dine/cart';
 import { refreshKitchenLoad } from '@/lib/kds/load';
 
-const pool = getPool();
-beforeAll(async () => { await runMigrations(pool); });
+const pool = await getPool();
+beforeAll(async () => { await runMigrations(getAdminPool()); });
 afterAll(async () => { await pool.end(); });
 
 const add = (menuItemId: string, quantity = 1, extra: object = {}) => ({
@@ -13,8 +13,8 @@ const add = (menuItemId: string, quantity = 1, extra: object = {}) => ({
 });
 
 test('adding items from two stations fires one ticket per station (md Route 3, station routing)', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   const r = await applyCartUpdate(pool, {
     sessionToken: t.sessionToken!,
     body: { order_type: 'DINE_IN', action: 'ADD', items: [
@@ -29,8 +29,8 @@ test('adding items from two stations fires one ticket per station (md Route 3, s
 });
 
 test('client-supplied price and station are ignored (Review Focus 1)', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   const r = await applyCartUpdate(pool, {
     sessionToken: t.sessionToken!,
     body: { order_type: 'DINE_IN', action: 'ADD', items: [
@@ -43,8 +43,8 @@ test('client-supplied price and station are ignored (Review Focus 1)', async () 
 });
 
 test('REMOVE reduces the line and fires a voided ticket with negative quantity', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   await applyCartUpdate(pool, { sessionToken: t.sessionToken!, body: add(m.naan, 2) });
   const r = await applyCartUpdate(pool, {
     sessionToken: t.sessionToken!,
@@ -56,8 +56,8 @@ test('REMOVE reduces the line and fires a voided ticket with negative quantity',
 });
 
 test('removing more than the line holds is rejected', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   await applyCartUpdate(pool, { sessionToken: t.sessionToken!, body: add(m.naan, 1) });
   await expect(applyCartUpdate(pool, {
     sessionToken: t.sessionToken!,
@@ -66,8 +66,8 @@ test('removing more than the line holds is rejected', async () => {
 });
 
 test('a delivery order is rejected on the dine-in path', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   await expect(applyCartUpdate(pool, {
     sessionToken: t.sessionToken!,
     body: { order_type: 'DELIVERY', action: 'ADD', items: [{ item_id: m.naan, name: 'Naan', quantity: 1 }] },
@@ -75,17 +75,17 @@ test('a delivery order is rejected on the dine-in path', async () => {
 });
 
 test('an item from another restaurant is unknown here', async () => {
-  const t = await seedDineRestaurant(pool);
-  const other = await seedDineRestaurant(pool);
-  const om = await seedMenu(pool, other.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const other = await seedDineRestaurant(getAdminPool());
+  const om = await seedMenu(getAdminPool(), other.restaurantId);
   await expect(applyCartUpdate(pool, { sessionToken: t.sessionToken!, body: add(om.naan) }))
     .rejects.toThrow('UNKNOWN_ITEM');
 });
 
 test('another table token cannot change this session (Review Focus 2)', async () => {
-  const t = await seedDineRestaurant(pool);
-  const other = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const other = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   await expect(applyCartUpdate(pool, { sessionToken: other.sessionToken!, body: add(m.naan) }))
     .rejects.toThrow('UNKNOWN_ITEM');
   const seen = await listSessionTickets(pool, other.sessionToken!);
@@ -93,8 +93,8 @@ test('another table token cannot change this session (Review Focus 2)', async ()
 });
 
 test('no cart change is accepted once the session is payment_pending', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   await applyCartUpdate(pool, { sessionToken: t.sessionToken!, body: add(m.naan) });
   await asSession(pool, { sessionToken: t.sessionToken! }, (c) =>
     c.query(`UPDATE tabletop_sessions SET status = 'payment_pending' WHERE id = $1`, [t.sessionId]));
@@ -103,12 +103,12 @@ test('no cart change is accepted once the session is payment_pending', async () 
 });
 
 test('the kitchen load reflects open tickets once a staff path refreshes it (decision 2)', async () => {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   await applyCartUpdate(pool, { sessionToken: t.sessionToken!, body: { order_type: 'DINE_IN', action: 'ADD', items: [
     { item_id: m.paneerTikka, name: 'a', quantity: 1 }, { item_id: m.lassi, name: 'b', quantity: 1 },
   ] } });
-  const staff = await seedStaff(pool, t.restaurantId);
+  const staff = await seedStaff(getAdminPool(), t.restaurantId);
   expect(await refreshKitchenLoad(pool, staff, t.restaurantId)).toBe(0.08);
   const { rows } = await pool.query(`SELECT active_kds_load::float8 AS load FROM restaurant_nodes WHERE id = $1`, [t.restaurantId]);
   expect(rows[0].load).toBe(0.08);

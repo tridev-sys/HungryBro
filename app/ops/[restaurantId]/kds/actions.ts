@@ -16,7 +16,7 @@ const ItemSchema = z.object({
 const TicketSchema = z.object({ restaurantId: z.string().uuid(), ticketId: z.string().uuid() });
 
 async function signedInActor() {
-  const actor = await resolveActor(getPool(), (await cookies()).toString());
+  const actor = await resolveActor(await getPool(), (await cookies()).toString());
   if (!actor) throw new Error('UNAUTHORIZED');
   return actor;
 }
@@ -28,14 +28,14 @@ async function announce(restaurantId: string, ticket: TicketView): Promise<void>
 
 export async function bumpItemAction(input: unknown): Promise<TicketView> {
   const parsed = ItemSchema.parse(input);
-  const ticket = await bumpItem(getPool(), await signedInActor(), parsed);
+  const ticket = await bumpItem(await getPool(), await signedInActor(), parsed);
   await announce(parsed.restaurantId, ticket);
   return ticket;
 }
 
 export async function bumpTicketAction(input: unknown): Promise<TicketView> {
   const parsed = TicketSchema.parse(input);
-  const ticket = await bumpTicket(getPool(), await signedInActor(), parsed);
+  const ticket = await bumpTicket(await getPool(), await signedInActor(), parsed);
   await announce(parsed.restaurantId, ticket);
   return ticket;
 }

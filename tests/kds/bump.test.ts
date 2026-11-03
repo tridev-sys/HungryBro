@@ -1,22 +1,22 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, getPool, runMigrations } from '@/lib/db/client';
 import { seedDineRestaurant, seedMenu } from '@/tests/helpers/seed';
 import { applyCartUpdate } from '@/lib/dine/cart';
 import { loadBoard, bumpItem, bumpTicket } from '@/lib/kds/board';
 
-const pool = getPool();
-beforeAll(async () => { await runMigrations(pool); });
+const pool = await getPool();
+beforeAll(async () => { await runMigrations(getAdminPool()); });
 afterAll(async () => { await pool.end(); });
 
 async function staffOf(restaurantId: string | null) {
-  const { rows } = await pool.query(
+  const { rows } = await getAdminPool().query(
     `INSERT INTO users (phone_number, role, restaurant_id) VALUES ($1, 'restaurant_staff', $2) RETURNING id`,
     ['+919' + Math.floor(1e8 + Math.random() * 9e8), restaurantId]);
   return { userId: rows[0].id, role: 'restaurant_staff' as const, restaurantId };
 }
 
 async function firedTwoTandoor() {
-  const t = await seedDineRestaurant(pool);
-  const m = await seedMenu(pool, t.restaurantId);
+  const t = await seedDineRestaurant(getAdminPool());
+  const m = await seedMenu(getAdminPool(), t.restaurantId);
   const cart = await applyCartUpdate(pool, { sessionToken: t.sessionToken!, body: { order_type: 'DINE_IN', action: 'ADD', items: [
     { item_id: m.paneerTikka, name: 'a', quantity: 1 }, { item_id: m.naan, name: 'b', quantity: 1 },
   ] } });
@@ -45,7 +45,7 @@ test('bump ticket serves the ticket and removes it from the board', async () => 
 
 test('staff of another restaurant cannot bump the ticket (Review Focus 5)', async () => {
   const { t, ticketId } = await firedTwoTandoor();
-  const other = await seedDineRestaurant(pool);
+  const other = await seedDineRestaurant(getAdminPool());
   const intruder = await staffOf(other.restaurantId);
   await expect(bumpItem(pool, intruder, { restaurantId: t.restaurantId, ticketId, itemIndex: 0 }))
     .rejects.toThrow('FORBIDDEN');
