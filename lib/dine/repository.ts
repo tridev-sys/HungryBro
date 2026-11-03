@@ -204,6 +204,14 @@ export async function refreshSettlement(
     if (allPaid) {
       await transitionSession(c, session.id, 'payment_pending', 'closed', { anyShareSettled: true });
       status = 'closed';
+      // Order record for a logged-in diner (decision 4). Settlement time = closed_at, which starts
+      // the 2-second rating window. Guest sessions have no diner id and write no row.
+      if (session.diner_user_id) {
+        await c.query(
+          `INSERT INTO order_refs (restaurant_id, diner_user_id, session_id, status, settled_at)
+           VALUES ($1, $2, $3, 'completed', (SELECT closed_at FROM tabletop_sessions WHERE id = $3))`,
+          [session.restaurant_id, session.diner_user_id, session.id]);
+      }
     }
 
     await c.query('UPDATE tabletop_sessions SET bill_split_spec = $2 WHERE id = $1',
