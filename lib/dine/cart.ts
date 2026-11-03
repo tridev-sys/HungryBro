@@ -133,7 +133,7 @@ export async function applyCartUpdate(
           }
         }
 
-        const change = cart.action === 'BILL_SPLIT' ? 'ADD' : cart.action;
+        const change: TicketItem['change'] = cart.action === 'REMOVE' ? 'REMOVE' : cart.action === 'MODIFY' ? 'MODIFY' : 'ADD';
         const item: TicketItem = {
           lineId,
           itemId: menu.id,
