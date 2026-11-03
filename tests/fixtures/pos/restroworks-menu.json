@@ -1,0 +1,29 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Restroworks capture after partner signs" },
+  "outletCode": "RW-TEST-009",
+  "menu": {
+    "sections": [
+      {
+        "sectionName": "Mains",
+        "stationTag": "Curry",
+        "products": [
+          {
+            "productId": "rw-dal-10",
+            "productName": "Dal Tadka",
+            "variations": [
+              { "variationId": "half", "price": 140.0, "vegFlag": true, "prepMinutes": 12, "inStock": true },
+              { "variationId": "full", "price": 220.0, "vegFlag": true, "prepMinutes": 15, "inStock": true }
+            ]
+          },
+          {
+            "productId": "rw-kebab-11",
+            "productName": "Seekh Kebab",
+            "variations": [
+              { "variationId": "std", "price": 360.0, "vegFlag": false, "prepMinutes": 14, "inStock": false }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

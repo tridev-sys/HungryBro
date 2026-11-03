@@ -1,0 +1,9 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Razorpay test-mode webhook captured under partner sign-off" },
+  "event": "payment.captured",
+  "payload": {
+    "payment": {
+      "entity": { "id": "pay_TEST0001", "order_id": "order_TEST0001", "amount": 69800, "status": "captured" }
+    }
+  }
+}

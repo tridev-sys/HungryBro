@@ -1,0 +1,14 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public ONDC/Beckn documentation, paraphrased", "replace_with": "recorded sandbox response after ONDC sandbox onboarding" },
+  "context": { "domain": "ONDC:RET10", "action": "on_select", "country": "IND", "city": "std:080", "core_version": "1.2.0", "bap_id": "bap.test.invalid", "bap_uri": "https://bap.test.invalid", "bpp_id": "bpp.test.invalid", "bpp_uri": "https://bpp.test.invalid", "transaction_id": "txn-1", "message_id": "msg-2", "timestamp": "2026-11-03T12:01:00.000Z" },
+  "message": {
+    "order": {
+      "provider": { "id": "prov-blr-1" },
+      "items": [ { "id": "item-biryani", "quantity": { "count": 2 } } ],
+      "fulfillments": [
+        { "id": "ful-1", "tracking": false, "state": { "descriptor": { "code": "Serviceable" } }, "tags": [ { "code": "ETA", "list": [ { "code": "MINUTES", "value": "28" } ] } ] }
+      ],
+      "quote": { "price": { "currency": "INR", "value": "698.00" }, "breakup": [] }
+    }
+  }
+}

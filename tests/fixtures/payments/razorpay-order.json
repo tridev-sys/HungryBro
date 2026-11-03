@@ -1,0 +1,7 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Razorpay test-mode response captured under partner sign-off" },
+  "id": "order_TEST0001",
+  "amount": 69800,
+  "currency": "INR",
+  "receipt": "ord-1"
+}

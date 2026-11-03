@@ -7,5 +7,5 @@
     "incremental": false,
     "outDir": "dist-scripts"
   },
-  "include": ["scripts/**/*.ts", "lib/db/**/*.ts"]
+  "include": ["scripts/**/*.ts", "lib/db/**/*.ts", "lib/pos/**/*.ts", "lib/webhooks/**/*.ts"]
 }

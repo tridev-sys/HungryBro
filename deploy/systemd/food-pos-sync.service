@@ -1,0 +1,9 @@
+[Unit]
+Description=Food OS nightly POS menu sync
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/docker
+ExecStart=/usr/bin/docker compose exec -T app node dist-scripts/scripts/pos-nightly-sync.js

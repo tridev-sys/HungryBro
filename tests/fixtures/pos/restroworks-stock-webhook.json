@@ -1,0 +1,6 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real Restroworks capture after partner signs" },
+  "topic": "variation.stock",
+  "outletCode": "RW-TEST-009",
+  "payload": { "productId": "rw-dal-10", "variationId": "half", "inStock": false }
+}
