@@ -92,7 +92,7 @@
 - Persistent data on a separate EBS gp3 volume.
 - Deploys: a GitHub Actions workflow builds the image, pushes it to GHCR, and SSHes to the instance to pull and restart. Rollback: redeploy the previous image tag.
 - **Logging (binding):** containers keep bounded `json-file` logs (10 MB × 3 per service). The `awslogs` driver is not used, because it cannot be combined with the json-file caps. The CloudWatch agent on the host reads the Docker json logs and ships them to CloudWatch.
-- Monitoring: `/api/health` checked every minute by an external uptime check; container logs to CloudWatch.
+- Monitoring: `/api/health` checked every 5 minutes by an external uptime check (free monitors do not offer 1-minute checks), with a CloudWatch `StatusCheckFailed` alarm as the backup; container logs to CloudWatch.
 - Rate limiting: token-bucket middleware in the app. A WAF is added in front (Cloudflare) once there is a domain; the app does not depend on it.
 
 **Testing**
