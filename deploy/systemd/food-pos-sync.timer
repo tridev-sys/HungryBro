@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Food OS POS menu sync nightly at 03:30 IST
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Kolkata
+Persistent=true
+Unit=food-pos-sync.service
+
+[Install]
+WantedBy=timers.target
