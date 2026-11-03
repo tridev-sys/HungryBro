@@ -1,0 +1,9 @@
+[Unit]
+Description=Monthly restore check on the 3rd at 04:00 UTC
+
+[Timer]
+OnCalendar=*-*-03 04:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
