@@ -11,7 +11,6 @@ export default defineConfig({
       { find: '@', replacement: path.resolve(__dirname) },
     ],
   },
-  oxc: { jsx: { runtime: 'automatic' } },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.{ts,tsx}'],
