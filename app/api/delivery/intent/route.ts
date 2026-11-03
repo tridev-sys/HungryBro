@@ -7,34 +7,13 @@ import { createAuction, readCounterBids } from '@/lib/auction/auction-repository
 import { createPostgisKitchenRepository } from '@/lib/auction/kitchen-repository';
 import { evaluateCounterBids, matchKitchenNodes } from '@/lib/auction/engine';
 import { runSandboxKitchens } from '@/lib/auction/sandbox-kitchens';
-import { createMeshBus, publishIntentToBlock } from '@/lib/mesh/bus';
+import { createMeshBus, MeshBusUnavailableError, publishIntentToBlock, withBusDeadline } from '@/lib/mesh/bus';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-
-// Bound on the first bus contact. Redis failure is bounded inside ioredis; this makes the
-// request answer within about 2 s whatever ioredis is doing.
-const BUS_DEADLINE_MS = 1800;
-
-class MeshBusUnavailableError extends Error {}
-
-async function withBusDeadline<T>(work: Promise<T>): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new MeshBusUnavailableError('mesh bus deadline exceeded')), BUS_DEADLINE_MS);
-  });
-  try {
-    return await Promise.race([work, deadline]);
-  } catch (err) {
-    if (err instanceof MeshBusUnavailableError) throw err;
-    throw new MeshBusUnavailableError((err as Error).message);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 async function handlePost(req: Request): Promise<Response> {
   const pool = await getPool();

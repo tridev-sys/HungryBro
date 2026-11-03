@@ -27,6 +27,29 @@ async function closeConnection(conn: Redis): Promise<void> {
   await conn.quit().catch(() => conn.disconnect());
 }
 
+// Bound on the first bus contact. Redis failure is bounded inside ioredis; this makes the
+// request answer within about 2 s whatever ioredis is doing.
+export const BUS_DEADLINE_MS = 1800;
+
+export class MeshBusUnavailableError extends Error {}
+
+// Races a bus call against BUS_DEADLINE_MS. Any failure, or the deadline, surfaces as
+// MeshBusUnavailableError so routes can map it to 503 MESH_BUS_UNAVAILABLE.
+export async function withBusDeadline<T>(work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new MeshBusUnavailableError('mesh bus deadline exceeded')), BUS_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } catch (err) {
+    if (err instanceof MeshBusUnavailableError) throw err;
+    throw new MeshBusUnavailableError((err as Error).message);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function createMeshBus(redisUrl: string | undefined = process.env.REDIS_URL): MeshBus {
   if (!redisUrl) throw new Error('REDIS_URL is not set');
   const url = redisUrl;
