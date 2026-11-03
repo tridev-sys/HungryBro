@@ -42,6 +42,8 @@ async function handleGet(request: Request, { params }: { params: Promise<{ resta
 
   // Subscribe before the snapshot, so no event fired in between is lost.
   const unsubscribe = await subscribeKdsEvents(restaurantId, (e) => {
+    // Settlement is a diner-only signal; the staff board shows tickets and load.
+    if (e.type === 'session.settled') return;
     if (!live) buffer.push(e);
     else chain = chain.then(() => forward(e));
   });
