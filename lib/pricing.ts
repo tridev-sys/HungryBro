@@ -38,6 +38,7 @@ export function gstOn(subtotal: number, rate: number = STATUTORY_GST_RATE): numb
 }
 
 export function splitGst(gst: number): { cgst: number; sgst: number } {
-  const half = round2(gst / 2);
-  return { cgst: half, sgst: half };
+  // SGST takes the remainder so the two halves always sum to the GST amount (odd paise).
+  const cgst = round2(gst / 2);
+  return { cgst, sgst: round2(gst - cgst) };
 }

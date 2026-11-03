@@ -26,3 +26,8 @@ test('gstOn applies 5%; splitGst halves it into CGST and SGST', () => {
   expect(gstOn(700)).toBe(35);
   expect(splitGst(35)).toEqual({ cgst: 17.5, sgst: 17.5 });
 });
+
+test('splitGst halves preserve the total for odd paise (CGST + SGST equals GST)', () => {
+  const s = splitGst(16.67);
+  expect(round2(s.cgst + s.sgst)).toBe(16.67);
+});
