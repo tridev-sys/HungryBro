@@ -23,7 +23,8 @@ export function getPool(): Promise<pg.Pool> {
 async function openAppPool(): Promise<pg.Pool> {
   const url = process.env.APP_DATABASE_URL;
   if (!url) throw new Error('APP_DATABASE_URL is not set');
-  const pool = new pg.Pool({ connectionString: url });
+  // Fail fast when the pool is exhausted instead of queueing forever.
+  const pool = new pg.Pool({ connectionString: url, connectionTimeoutMillis: 5000 });
   try {
     const client = await pool.connect();
     try {
