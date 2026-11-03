@@ -1,7 +1,7 @@
-import { getPool } from '../lib/db/client';
+import { getAdminPool } from '../lib/db/client';
 import { seedMeshDev } from '../lib/dev/seed-mesh';
 
-const pool = getPool();
+const pool = getAdminPool();
 seedMeshDev(pool)
   .then(() => console.log('mesh dev seed OK'))
   .catch((err) => {

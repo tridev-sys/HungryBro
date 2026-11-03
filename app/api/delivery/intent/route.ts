@@ -14,7 +14,7 @@ const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 export async function POST(req: Request): Promise<Response> {
-  const pool = getPool();
+  const pool = await getPool();
   let dinerId: string;
   try {
     dinerId = await resolveDiner(req, pool);

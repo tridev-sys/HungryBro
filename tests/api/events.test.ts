@@ -1,17 +1,19 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, getPool, runMigrations } from '@/lib/db/client';
+import { ensureAppLogin } from '../helpers/db';
 import { createMeshBus, type MeshBus } from '@/lib/mesh/bus';
 import { auctionEventsChannel } from '@/lib/mesh/geohash';
 import { GET } from '@/app/api/delivery/auctions/[id]/events/route';
 import { makeUser, makeAuction } from '../helpers/mesh-fixtures';
 
-const pool = getPool();
+const admin = getAdminPool();
 let bus: MeshBus;
 beforeAll(async () => {
   process.env.ALLOW_DEV_DINER = '1';
-  await runMigrations(pool);
+  await runMigrations(admin);
+  await ensureAppLogin(admin);
   bus = createMeshBus(process.env.REDIS_URL);
 });
-afterAll(async () => { await bus.close(); await pool.end(); });
+afterAll(async () => { await bus.close(); await (await getPool()).end(); await admin.end(); });
 
 async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle: string): Promise<string> {
   const dec = new TextDecoder(); let buf = '';
@@ -26,8 +28,8 @@ async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, needle
 }
 
 test('stream opens with a snapshot and then forwards a bid published on the auction channel', async () => {
-  const diner = await makeUser(pool, 'diner');
-  const auction = await makeAuction(pool, diner, { createdAgoSeconds: 1 });
+  const diner = await makeUser(admin, 'diner');
+  const auction = await makeAuction(admin, diner, { createdAgoSeconds: 1 });
   const ac = new AbortController();
   const res = await GET(new Request('http://localhost/x', { signal: ac.signal, headers: { 'x-dev-diner': diner } }),
     { params: Promise.resolve({ id: auction }) });

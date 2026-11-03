@@ -21,7 +21,7 @@ const json = (body: unknown, status: number) =>
 // a ': ping' comment every 15 s. Subscribes before the snapshot so no bid is missed.
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await ctx.params;
-  const pool = getPool();
+  const pool = await getPool();
 
   let dinerId: string;
   try {
