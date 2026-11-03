@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { slaMinutesFor, slaState, type OrderOrigin } from '@/lib/kds/sla';
 
 export type TicketStatus = 'queued' | 'in_prep' | 'ready' | 'served' | 'voided';
@@ -10,6 +11,10 @@ export interface TicketCardProps {
   orderOrigin: OrderOrigin;
   tableLabel?: string;
   items: string[];
+  /** Optional colour from the caller (decision 3 via lib/kds/timers). Defaults to slaState. */
+  colour?: 'green' | 'yellow' | 'red';
+  /** Optional controls, such as the Route 3 bump buttons. */
+  actions?: ReactNode;
 }
 
 const STATUS_LABEL: Record<TicketStatus, string> = {
@@ -34,8 +39,10 @@ export function TicketCard({
   orderOrigin,
   tableLabel,
   items,
+  colour: colourOverride,
+  actions,
 }: TicketCardProps) {
-  const colour = slaState(elapsedMinutes, slaMinutesFor(orderOrigin));
+  const colour = colourOverride ?? slaState(elapsedMinutes, slaMinutesFor(orderOrigin));
 
   return (
     <article className="min-w-[160px] snap-start rounded-[var(--radius-card)] bg-[var(--color-surface)] p-3">
@@ -53,6 +60,7 @@ export function TicketCard({
           <li key={item}>{item}</li>
         ))}
       </ul>
+      {actions ? <div className="mt-3 flex flex-wrap gap-2">{actions}</div> : null}
     </article>
   );
 }

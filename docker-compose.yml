@@ -39,9 +39,14 @@ services:
     image: redis:7-alpine
     container_name: food-os-redis
     restart: unless-stopped
+    # Local development only: loopback so host tests can connect. Production override publishes nothing.
     ports:
       - "127.0.0.1:6379:6379"
     command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    # Local development only: bound to loopback so host tests can connect (Plan 03 Task 8).
+    # Production publishes nothing.
+    ports:
+      - "127.0.0.1:6379:6379"
     networks:
       - backend
     volumes:
