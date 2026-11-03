@@ -2,6 +2,32 @@ import { encryptCredentials, loadPosKey } from '../../lib/pos/credentials';
 import type pg from 'pg';
 import { randomUUID, randomInt } from 'node:crypto';
 
+// Sets food_app_login's password to the one in APP_DATABASE_URL, so the runtime pool can connect
+// in tests. Test database only. Takes an advisory lock because several test files call it in parallel.
+export async function ensureAppLogin(admin: pg.Pool): Promise<void> {
+  const raw = process.env.APP_DATABASE_URL;
+  if (!raw) throw new Error('APP_DATABASE_URL is not set');
+  const password = decodeURIComponent(new URL(raw).password);
+  const c = await admin.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('food_app_login_test'))`);
+    await c.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'food_app_login') THEN
+        CREATE ROLE food_app_login LOGIN;
+      END IF;
+    END $$`);
+    await c.query(`ALTER ROLE food_app_login WITH LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD ${c.escapeLiteral(password)}`);
+    await c.query('GRANT food_app TO food_app_login');
+    await c.query('COMMIT');
+  } catch (err) {
+    await c.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    c.release();
+  }
+}
+
 export const randomPhone = () => '+919' + String(randomInt(100_000_000, 999_999_999));
 
 export async function makeRestaurant(pool: pg.Pool): Promise<string> {

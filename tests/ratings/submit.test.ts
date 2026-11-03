@@ -1,15 +1,16 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { SubmitRatingSchema } from '@/lib/ratings/schema';
 import { submitVerifiedRating } from '@/lib/ratings/submit';
 import { issueSession } from '@/lib/auth/session';
 import { POST } from '@/app/api/ratings/route';
-import { makeRestaurant, makeUser } from '../helpers/db';
+import { ensureAppLogin, makeRestaurant, makeUser } from '../helpers/db';
 
-const pool = getPool();
+const pool = getAdminPool();
 
 beforeAll(async () => {
   process.env.AUTH_JWT_SECRET = 'a'.repeat(40);
   await runMigrations(pool);
+  await ensureAppLogin(pool);
 });
 afterAll(async () => { await pool.end(); });
 

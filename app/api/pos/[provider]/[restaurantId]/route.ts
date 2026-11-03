@@ -28,7 +28,7 @@ export async function POST(
   const headers = Object.fromEntries(req.headers.entries());
 
   try {
-    const result = await asIntegration(getPool(), restaurantId, async (c) => {
+    const result = await asIntegration(await getPool(), restaurantId, async (c) => {
       const { rows } = await c.query('SELECT pos_provider FROM restaurant_nodes WHERE id = $1', [restaurantId]);
       if (rows.length === 0 || rows[0].pos_provider !== provider) {
         return { status: 404, body: { error: 'not_found' } };

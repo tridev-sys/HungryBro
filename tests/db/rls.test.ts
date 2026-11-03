@@ -1,8 +1,8 @@
-import { getPool, runMigrations, asRole } from '@/lib/db/client';
+import { getAdminPool, runMigrations, asRole } from '@/lib/db/client';
 import { randomUUID } from 'node:crypto';
 import type pg from 'pg';
 
-const pool = getPool();
+const pool = getAdminPool();
 const tag = randomUUID().slice(0, 8);
 
 beforeAll(async () => { await runMigrations(pool); });

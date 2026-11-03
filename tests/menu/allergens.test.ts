@@ -1,8 +1,8 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { filterByAllergens, isAllergenSafe, ALLERGEN_TAGS } from '@/lib/menu/allergens';
 import { makeRestaurant } from '../helpers/db';
 
-const pool = getPool();
+const pool = getAdminPool();
 
 beforeAll(async () => { await runMigrations(pool); });
 afterAll(async () => { await pool.end(); });

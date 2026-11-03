@@ -1,7 +1,7 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { createRestaurant } from '../helpers/db';
 
-const pool = getPool();
+const pool = getAdminPool();
 beforeAll(async () => { await runMigrations(pool); });
 afterAll(async () => { await pool.end(); });
 

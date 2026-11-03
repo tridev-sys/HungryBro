@@ -16,7 +16,7 @@ export async function POST(req: Request): Promise<Response> {
   if (!verified) return Response.json({ error: 'INVALID_SIGNATURE' }, { status: 401 });
   if (!signature) return Response.json({ error: 'MISSING_EVENT_ID' }, { status: 400 });
 
-  const recorded = await recordWebhookEvent(getPool(), 'cashfree', signature);
+  const recorded = await recordWebhookEvent(await getPool(), 'cashfree', signature);
   if (recorded === 'DUPLICATE') return Response.json({ error: 'DUPLICATE_EVENT' }, { status: 409 });
   return Response.json({ ok: true }, { status: 200 });
 }

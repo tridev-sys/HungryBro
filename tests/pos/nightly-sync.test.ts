@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { runNightlyMenuSync, httpMenuFetcher } from '@/lib/pos/nightly-sync';
 import { getSyncPool, withSyncTx } from '@/lib/db/sync';
 import { createRestaurant } from '../helpers/db';
 
-const owner = getPool();    // owner role for migrations, seed rows, and fixtures only
+const owner = getAdminPool();    // owner role for migrations, seed rows, and fixtures only
 const pool = getSyncPool(); // food_sync: the only pool the nightly sync uses
 beforeAll(async () => {
   await runMigrations(owner);

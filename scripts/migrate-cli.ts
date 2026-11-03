@@ -1,7 +1,7 @@
-import { getPool, runMigrations } from '../lib/db/client';
+import { getAdminPool, runMigrations } from '../lib/db/client';
 
 async function main(): Promise<void> {
-  const pool = getPool();
+  const pool = getAdminPool();
   try {
     const applied = await runMigrations(pool);
     console.log(applied.length ? `applied: ${applied.join(', ')}` : 'no pending migrations');

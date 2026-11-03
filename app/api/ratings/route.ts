@@ -23,7 +23,7 @@ export async function POST(req: Request): Promise<Response> {
   const parsed = SubmitRatingSchema.safeParse(body);
   if (!parsed.success) return Response.json({ error: 'INVALID_BODY' }, { status: 400 });
 
-  const result = await submitVerifiedRating(getPool(), claims.userId, parsed.data);
+  const result = await submitVerifiedRating(await getPool(), claims.userId, parsed.data);
   if (result.ok) return Response.json({ ratingId: result.ratingId }, { status: 201 });
   return Response.json({ error: result.code }, { status: STATUS[result.code] });
 }

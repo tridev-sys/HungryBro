@@ -1,22 +1,23 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { constantTimeEqual } from '@/lib/security/timing';
 import {
   verifyRazorpaySignature, verifyCashfreeSignature, recordWebhookEvent,
 } from '@/lib/payments/webhooks';
 import { POST as razorpayPost } from '@/app/api/webhooks/razorpay/route';
 import { POST as cashfreePost } from '@/app/api/webhooks/cashfree/route';
+import { ensureAppLogin } from '../helpers/db';
 
-const pool = getPool();
+const pool = getAdminPool();
 const RZ = 'rz_secret_test_value';
 const CF = 'cf_secret_test_value';
 const body = JSON.stringify({ event: 'payment.captured', payload: { amount: 71000 } });
 
 beforeAll(async () => {
-  process.env.DATABASE_URL ??= 'postgres://food:change-me@localhost:5432/food_os';
   process.env.RAZORPAY_WEBHOOK_SECRET = RZ;
   process.env.CASHFREE_WEBHOOK_SECRET = CF;
   await runMigrations(pool);
+  await ensureAppLogin(pool);
 });
 afterAll(async () => { await pool.end(); });
 
