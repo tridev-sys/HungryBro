@@ -1,0 +1,17 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Food OS app. Routes the domain to the app container on the shared network.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy food-os-app:3000 {
+		header_up X-Real-IP {remote_host}
+	}
+	header {
+		-Server
+	}
+	log {
+		output stdout
+	}
+}

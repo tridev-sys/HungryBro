@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Put the app behind Caddy with TLS on one `c7i.xlarge` EC2 instance in `ap-south-1`, add in-app token-bucket rate limiting, security headers and body limits, nightly backups with a monthly restore test, a CI build-and-deploy pipeline with rollback, idempotent seed data for Indiranagar and HSR, and Playwright end-to-end tests for dine-in isolation and multi-merchant delivery auctions.
+**Goal:** Put the app behind the shared Caddy proxy (`proxy_server/`, container `proxy-caddy`) with Let's Encrypt TLS on one `c7i.xlarge` EC2 instance in `ap-south-1`, add in-app token-bucket rate limiting, security headers and body limits, nightly backups with a monthly restore test, a CI build-and-deploy pipeline with rollback, idempotent seed data for Indiranagar and HSR, and Playwright end-to-end tests for dine-in isolation and multi-merchant delivery auctions.
 
-**Architecture:** Plan 01's `Dockerfile` and `docker-compose.yml` stay the base. This plan adds `docker-compose.prod.yml` as an override (ports removed, memory limits, networks, EBS bind mount, logging) and a `deploy/` directory (Caddyfile, systemd units, S3 lifecycle, deploy script). Rate limiting and HTTP guards live in `lib/ratelimit/` and `lib/http/` and run on the Node runtime inside route handlers. Operational scripts live in `scripts/`. Shell tests live in `scripts/tests/`.
+**Architecture:** Plan 01's `Dockerfile` and `docker-compose.yml` stay the base. This plan adds `docker-compose.prod.yml` as an override (ports removed, CPU and memory caps, networks, EBS bind mount, logging) and a `deploy/` directory (systemd units, S3 lifecycle, deploy script). The shared Caddy proxy is a separate stack in `proxy_server/` (its own compose file and Caddyfile) that joins the external `shared` network; it is the only service that publishes host ports. Rate limiting and HTTP guards live in `lib/ratelimit/` and `lib/http/` and run on the Node runtime inside route handlers. Operational scripts live in `scripts/`. Shell tests live in `scripts/tests/`.
 
-**Tech Stack:** Next.js 15 (Node runtime), Redis 7 Alpine (Lua for atomic buckets), Caddy 2, Docker Compose v2.24.4+ (uses `!reset` and `!override`), PostgreSQL 16 + PostGIS 3.4, GitHub Actions, GHCR, systemd timers, AWS CLI v2, UFW, Playwright, Vitest, `jq`.
+**Tech Stack:** Next.js 15 (Node runtime), Redis 7 Alpine (Lua for atomic buckets), Caddy 2 (`caddy:2-alpine`, shared proxy), Docker Compose v2.24.4+ (uses `!reset` and `!override`), PostgreSQL 16 + PostGIS 3.4, GitHub Actions, GHCR, systemd timers, AWS CLI v2, UFW, Playwright, Vitest, `jq`.
 
 **Spec:** `/home/ubuntu/original/food_prompt.md` §6; PDF "Ingress & Edge Proxy" topology (WAF and token-bucket rate limiting, ephemeral session token validation) and the seed and end-to-end test lines in the PDF roadmap. Decisions in `2026-11-03-00-roadmap.md` and `2026-11-03-tech-decisions.md` apply here and override the roadmap where they differ (see Global Constraints).
 
@@ -15,11 +15,11 @@
 In:
 - (a) Token-bucket rate limiter: pure function plus Redis-backed store, per-IP and per-session keys, tested with a fake clock.
 - (b) Security headers and a 64 KiB body limit on API routes.
-- (c) Caddy service with automatic TLS; app bound only to the internal `edge` network.
+- (c) Shared Caddy proxy (`proxy_server/`, container `proxy-caddy`) with automatic Let's Encrypt TLS; the app is reachable only over the external `shared` network.
 - (d) Per-container memory limits matching the tech-decision budget; Redis `maxmemory 256mb` with `allkeys-lru`.
 - (e) Backups: `pg_dump` to S3 with 14-day retention, systemd timers, restore script that loads into a scratch database and checks row counts against a manifest; monthly restore test.
 - (f) GitHub Actions: test, build, push to GHCR, SSH deploy by immutable `sha-` tag, health check, rollback to the previous tag on failure.
-- (g) EC2 bootstrap for Ubuntu: Docker, Compose plugin, 2 GiB swap, EBS data volume mounted at `/mnt/pgdata`, UFW allowing only 22, 80, 443.
+- (g) EC2 bootstrap for Ubuntu: Docker, Compose plugin, 2 GiB swap, EBS data volume mounted at `/home/ubuntu/docker/data`, UFW allowing only 22, 80, 443.
 - (h) Idempotent seed script: four test restaurants (two in Indiranagar, two in HSR) with menus and dine-in tables.
 - (i) Playwright E2E suite with two specs: simultaneous dine-in sessions and a multi-merchant delivery auction.
 - (j) External uptime check on `/api/health` (free monitor, 5-minute interval), a CloudWatch instance alarm as backup, and the CloudWatch log driver.
@@ -47,8 +47,9 @@ Out:
   - `Permissions-Policy: microphone=(self), camera=(), geolocation=(self)`
   - Nonce-based CSP is deferred; `unsafe-inline` is the documented trade-off until then.
 - Client IP: Caddy overwrites `X-Real-IP` with the TCP peer address. The app reads `X-Real-IP` first and falls back to the rightmost `X-Forwarded-For` entry. It never trusts the leftmost entry. When Cloudflare is added, Caddy switches to `CF-Connecting-IP` in one place.
-- Production ports: only `caddy` publishes host ports (`80`, `443`). `app`, `db`, and `redis` publish none in the prod override. `app` is on networks `edge` and `backend`; `db` and `redis` are on `backend` only.
-- Hardware (tech decisions, decision 4): `c7i.xlarge` (4 vCPU, 8 GiB RAM) in `ap-south-1`, Ubuntu LTS. Not c4 and not t3. EBS gp3 for all volumes: root volume 60 GiB; data volume 100 GiB mounted at `/mnt/pgdata`, with at least 20 GiB kept free there for `pg_dump` scratch.
+- Production ports: only `proxy-caddy` (the shared proxy) publishes host ports, exactly `80` and `443`. `app`, `db`, and `redis` publish none in the prod override. `app` is on networks `shared` (external) and `backend`; `db` and `redis` are on `backend` only. Caddy obtains and renews Let's Encrypt certificates for `DOMAIN` automatically, using `ACME_EMAIL`; HTTP redirects to HTTPS.
+- Resource limits and volumes (tech decisions, binding): every service sets `cpus`, `mem_limit`, `mem_reservation`, `pids_limit`, a json-file log cap (`max-size` 10m, `max-file` 3), and `restart: unless-stopped`. Postgres data is a bind mount at `/home/ubuntu/docker/data/postgres`. Named volumes carry fixed names and labels (`food-os-redisdata`, `proxy-caddy-data`). Volumes are never removed by `docker compose down`.
+- Hardware (tech decisions, decision 4): `c7i.xlarge` (4 vCPU, 8 GiB RAM) in `ap-south-1`, Ubuntu LTS. Not c4 and not t3. EBS gp3 for all volumes: root volume 60 GiB; data volume 100 GiB mounted at `/home/ubuntu/docker/data`, with at least 20 GiB kept free there for `pg_dump` scratch.
 - Memory budget (`c7i.xlarge`, 8 GiB RAM):
 
   | Container | `mem_limit` | Note |
@@ -56,29 +57,30 @@ Out:
   | `db` (Postgres + PostGIS) | 2 GiB | Per tech decisions |
   | `app` (includes migrations) | 1 GiB | `NODE_OPTIONS=--max-old-space-size=768` |
   | `redis` | 320 MiB | `maxmemory 256mb`; overhead above the cap |
-  | `caddy` | 128 MiB | |
+  | `proxy-caddy` | 128 MiB | 0.5 CPU; shared proxy in `proxy_server/` |
   | OS, Docker, page cache | about 4.5 GiB | Includes 2 GiB swap file |
 
 - Redis: `redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru`. Auction state is ephemeral; the database holds the record.
-- Persistent data: Postgres data on the 100 GiB EBS gp3 data volume mounted at `/mnt/pgdata` (container path `/var/lib/postgresql/data`; host path set by `PGDATA_DIR`, default `/mnt/pgdata/postgres`). Redis AOF in the named volume `redisdata`.
+- Persistent data: Postgres data on the 100 GiB EBS gp3 data volume mounted at `/home/ubuntu/docker/data` (container path `/var/lib/postgresql/data`; host path set by `PGDATA_DIR`, default `/home/ubuntu/docker/data/postgres`). Redis AOF in the named volume `redisdata`.
 - Images: `ghcr.io/<owner>/food-os:sha-<40-hex-commit>`. Production never uses `latest`. GHCR owner must be lowercase.
-- Backups: nightly at 21:00 UTC (02:30 IST) to `s3://<BACKUP_BUCKET>/pg/`. Retention 14 days by S3 lifecycle rule on prefix `pg/`. Restore test on the 3rd of each month at 04:00 UTC.
+- Backups: nightly at 21:00 UTC (02:30 IST) to `s3://<BACKUP_BUCKET>/pg/`. Retention 14 days by S3 lifecycle rule on prefix `pg/`. Restore test on the 3rd of each month at 04:00 UTC. The `proxy-caddy-data` volume is archived weekly (Sundays 21:30 UTC) to `s3://<BACKUP_BUCKET>/caddy/` with the same 14-day rule (Task 6).
 - Migrations must be expand-only (no column drops or renames in the same release as a code change). Rollback to the previous image is only safe under that rule.
 - Seed areas: Indiranagar and HSR only (tech decisions, decision 6). Koramangala is not seeded in v1; the roadmap's Koramangala mention is superseded.
 - Database roles (tech decisions, decision 2): the migration runner and `scripts/seed.ts` connect as `food_admin` (BYPASSRLS, not superuser; `SET LOCAL ROLE food_admin` for DDL). `backup-pg.sh` uses a dedicated role `food_backup` (LOGIN, password from `BACKUP_DB_PASSWORD`, granted the built-in `pg_read_all_data`; no superuser, no write grants). `restore-check.sh` uses `food_admin` for the restore step only (create and restore the scratch database, then drop it) and `food_backup` for the row counts. The bootstrap login `food` is a superuser and is used only for the one-time role bootstrap (Task 6), which the instance owner runs once and which is documented as such. None of these scripts use `food_app` (request traffic) or `food_sync` (nightly sync job only).
 - Caddy, not Nginx (tech decisions).
-- Secrets: never in the repository. Host secrets live in `/opt/food-os/.env` (mode `600`). CI secrets live in GitHub Actions secrets.
+- Secrets: never in the repository. Host secrets live in `/home/ubuntu/docker/.env` (mode `600`). CI secrets live in GitHub Actions secrets.
 - Seed script refuses to run when `NODE_ENV=production` unless `ALLOW_SEED_PROD=yes`.
 - Seed data uses fictional restaurant names. Do not use the PDF's real example brands (Meghna Foods, Empire).
 - Delivery E2E drop point: `DROP = { lat: 12.9420, lng: 77.6430 }` is a placeholder between the Indiranagar and HSR clusters, labelled `OWNER TO SET a real address`. It is within the 6 km transit radius of all four seeded kitchens (about 3.0 to 3.9 km each). The owner replaces it with a real address.
-- Playwright E2E runs against `E2E_BASE_URL` (default `http://localhost:3000`).
+- Playwright E2E runs in the Playwright image attached to the `shared` network, against `E2E_BASE_URL=http://food-os-app:3000` (Gap A decision: the app publishes no host port, so `localhost:3000` is unreachable).
+- The host runs Docker only. No Node, npm, or npx on the host: every Node command runs in a container (`node:22-alpine`, run as UID 1000, `--network host` to reach the local `localhost:5432` and `6379` ports), as shown in the Run lines.
 
 ## Review Focus
 
 1. A token bucket never grants more than its capacity after long idle periods, and a denied request consumes no tokens. Owned by Task 1.
 2. A client-sent `X-Forwarded-For` cannot change its own rate-limit bucket. Owned by Task 2.
 3. A request body over 64 KiB is rejected even when `Content-Length` is absent. Owned by Task 3.
-4. Only ports 22, 80, and 443 are publicly listening on the host, and `app`, `db`, `redis` publish no ports. Owned by Task 5.
+4. Across the whole stack, only `proxy-caddy` publishes host ports, exactly `80` and `443`; `app`, `db`, and `redis` publish none; the host listens publicly on only 22, 80, and 443. Owned by Task 4 (compose) and Task 5 (host).
 5. A restore whose restored row counts differ from the backup manifest fails the restore check. Owned by Task 6.
 
 ---
@@ -169,7 +171,7 @@ test('rejects non-positive configuration and cost', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `npx vitest run tests/ratelimit/bucket.test.ts`
+Run: `docker run --rm --network host --user 1000:1000 -e HOME=/tmp -v /home/ubuntu/docker:/app -w /app node:22-alpine npx vitest run tests/ratelimit/bucket.test.ts`
 Expected: FAIL, "Cannot find module '@/lib/ratelimit/bucket'".
 
 - [ ] **Step 3: Implement `lib/ratelimit/bucket.ts` and `lib/ratelimit/limits.ts`**
@@ -198,7 +200,7 @@ export function consumeToken(state: BucketState | null, cfg: BucketConfig, nowMs
 
 - [ ] **Step 4: Verify**
 
-Run: `npx vitest run tests/ratelimit/bucket.test.ts`
+Run: `docker run --rm --network host --user 1000:1000 -e HOME=/tmp -v /home/ubuntu/docker:/app -w /app node:22-alpine npx vitest run tests/ratelimit/bucket.test.ts`
 Expected: 7 passed.
 
 - [ ] **Step 5: Commit**
@@ -307,7 +309,7 @@ Guard test (`tests/ratelimit/guard.test.ts`, Redis real): given a store with `ca
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `REDIS_URL=redis://localhost:6379 npx vitest run tests/ratelimit`
+Run: `docker run --rm --network host --user 1000:1000 -e HOME=/tmp -e REDIS_URL=redis://localhost:6379 -v /home/ubuntu/docker:/app -w /app node:22-alpine npx vitest run tests/ratelimit`
 Expected: FAIL, "Cannot find module '@/lib/ratelimit/keys'" (Redis must be running from the Plan 01 compose stack).
 
 - [ ] **Step 3: Implement**
@@ -344,7 +346,7 @@ return { allowed, retry }
 
 - [ ] **Step 4: Verify**
 
-Run: `REDIS_URL=redis://localhost:6379 npx vitest run tests/ratelimit`
+Run: `docker run --rm --network host --user 1000:1000 -e HOME=/tmp -e REDIS_URL=redis://localhost:6379 -v /home/ubuntu/docker:/app -w /app node:22-alpine npx vitest run tests/ratelimit`
 Expected: all pass: `keys` (4 tests), `redis-store` (3 tests), `guard` (2 tests).
 
 - [ ] **Step 5: Commit**
@@ -444,7 +446,7 @@ test('existing response body and status are preserved', async () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `npx vitest run tests/http`
+Run: `docker run --rm --network host --user 1000:1000 -e HOME=/tmp -v /home/ubuntu/docker:/app -w /app node:22-alpine npx vitest run tests/http`
 Expected: FAIL, "Cannot find module '@/lib/http/body'".
 
 - [ ] **Step 3: Implement**
@@ -480,7 +482,7 @@ export async function readJsonWithLimit(req: Request, limit = BODY_LIMIT_BYTES):
 
 - [ ] **Step 4: Verify**
 
-Run: `npx vitest run tests/http && npm run typecheck && npm run build`
+Run: `docker run --rm --network host --user 1000:1000 -e HOME=/tmp -v /home/ubuntu/docker:/app -w /app node:22-alpine npx vitest run tests/http && docker run --rm --network host --user 1000:1000 -e HOME=/tmp -v /home/ubuntu/docker:/app -w /app node:22-alpine npm run typecheck && docker run --rm --network host --user 1000:1000 -e HOME=/tmp -v /home/ubuntu/docker:/app -w /app node:22-alpine npm run build`
 Expected: 6 tests pass (body: 4, security: 2); typecheck exits 0; build succeeds with headers configured. Add one guard test to `tests/ratelimit/guard.test.ts` that a streamed oversize body returns `413` through `withApiGuards`; it must pass in this step too.
 
 - [ ] **Step 5: Commit**
@@ -494,22 +496,23 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Caddy, Production Compose Override, Memory Limits, and Redis Cap
+### Task 4: Shared Proxy and Production Override
 
 **Files:**
-- Create: `deploy/Caddyfile`, `docker-compose.prod.yml`, `scripts/tests/prod-compose.test.sh`
+- Create (or verify, if already present): `proxy_server/Caddyfile`, `proxy_server/docker-compose.yml`, `docker-compose.prod.yml`, `scripts/tests/prod-compose.test.sh`
 - Modify: `docker-compose.yml` (Plan 01 base): only the `redis` service `command`
 
 **Interfaces:**
-- Consumes: Plan 01 `docker-compose.yml` (`app`, `db`, `redis`, `pgdata`, `redisdata`, healthchecks); `IMAGE_TAG`, `GHCR_OWNER`, `DOMAIN`, `POSTGRES_PASSWORD`, `PGDATA_DIR` env (set in `/opt/food-os/.env`).
+- Consumes: Plan 01 `docker-compose.yml` (`app`, `db`, `redis`, `pgdata`, `redisdata`, the `backend` and external `shared` networks, healthchecks); `proxy_server/create-shared-network.sh` (creates `shared`); `IMAGE_TAG`, `GHCR_OWNER`, `POSTGRES_PASSWORD`, `PGDATA_DIR` env (set in `/home/ubuntu/docker/.env`); `DOMAIN` and `ACME_EMAIL` env (set in the proxy's `.env`).
 - Produces:
-  - `deploy/Caddyfile`: site `{$DOMAIN}`; `reverse_proxy app:3000` with `header_up X-Real-IP {remote_host}`; automatic TLS; `encode zstd gzip`; access log to stdout.
+  - `proxy_server/Caddyfile`: global block `{ email {$ACME_EMAIL} }`; one site block for `{$DOMAIN}` with `encode zstd gzip`, `header { -Server }`, `reverse_proxy food-os-app:3000` with `header_up X-Real-IP {remote_host}`, and access logs to stdout. Automatic Let's Encrypt TLS and the HTTP-to-HTTPS redirect come from Caddy's defaults. Adding an app means adding one site block.
+  - `proxy_server/docker-compose.yml` (run from `proxy_server/`): service `caddy`, `container_name: proxy-caddy`, `image: caddy:2-alpine`, `ports: ["80:80", "443:443"]`, mounts `./Caddyfile:/etc/caddy/Caddyfile:ro` and the named volumes `caddy_data` and `caddy_config`, env `DOMAIN` and `ACME_EMAIL` (both required via `${...:?}`), `restart: unless-stopped`, `networks: [shared]`, caps `cpus: 0.5`, `mem_limit: 128m`, `mem_reservation: 64m`, `pids_limit: 128` (tech decisions require both keys but give no Caddy values; these two are proposed), json-file log cap (`max-size` 10m, `max-file` 3). Top level: `networks: { shared: { external: true } }`.
+    - Volume `caddy_data`: `name: proxy-caddy-data`, labels `app: food-os`, `purpose: tls-certificates`. It holds Let's Encrypt certificates and ACME account keys; losing it forces re-issuance, so it is part of the backup set (backup mechanism to be confirmed; see Unresolved Gaps). `caddy_config` is labelled `purpose: caddy-config`.
   - `docker-compose.prod.yml` override (run as `docker compose -f docker-compose.yml -f docker-compose.prod.yml`):
-    - `app`: `image: ghcr.io/${GHCR_OWNER}/food-os:${IMAGE_TAG:?}`, `build: !reset null`, `ports: !reset []`, `expose: ["3000"]`, `mem_limit: 1g`, `networks: [edge, backend]`, `restart: unless-stopped`.
-    - `db`: `ports: !reset []`, `volumes: !override ["${PGDATA_DIR:-/mnt/pgdata/postgres}:/var/lib/postgresql/data"]`, `mem_limit: 2g`, `shm_size: 256m`, `networks: [backend]`, `restart: unless-stopped`.
-    - `redis`: `ports: !reset []`, `mem_limit: 320m`, `networks: [backend]`, `restart: unless-stopped`.
-    - `caddy`: `image: caddy:2-alpine`, `ports: ["80:80", "443:443"]`, mounts `./deploy/Caddyfile:/etc/caddy/Caddyfile:ro` and named volumes `caddy_data`, `caddy_config`, `env DOMAIN`, `mem_limit: 128m`, `networks: [edge]`, `depends_on: app: condition: service_healthy`.
-    - Networks: `edge` and `backend`, both `driver: bridge`. Named volumes `caddy_data`, `caddy_config`.
+    - `app`: `image: ghcr.io/${GHCR_OWNER}/food-os:${IMAGE_TAG:?}`, `build: !reset null`, `ports: !reset []`, `expose: ["3000"]`, `cpus: 1.5`, `mem_limit: 1g`, `mem_reservation: 512m`, `pids_limit: 512`, `networks: [shared, backend]`, `restart: unless-stopped`.
+    - `db`: `ports: !reset []` (the base's `127.0.0.1:5432` binding is removed; prod publishes nothing), `volumes: !override ["${PGDATA_DIR:-/home/ubuntu/docker/data/postgres}:/var/lib/postgresql/data"]` (bind mount to `/home/ubuntu/docker/data/postgres` on the data volume; the base's `food-os-pgdata` named volume is not used in prod), `cpus: 2.0`, `mem_limit: 2g`, `mem_reservation: 1g`, `shm_size: 256m`, `pids_limit: 256`, `networks: [backend]`, `restart: unless-stopped`.
+    - `redis`: `ports: !reset []`, `cpus: 0.5`, `mem_limit: 320m`, `mem_reservation: 128m`, `pids_limit: 128`, `networks: [backend]`, `restart: unless-stopped`.
+    - No `caddy` service here (the proxy is its own stack), and no `depends_on` across stacks.
   - Base `redis` `command`: `redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru`.
 
 - [ ] **Step 1: Write the failing test**
@@ -519,30 +522,39 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 # scripts/tests/prod-compose.test.sh
 set -euo pipefail
 export IMAGE_TAG=sha-0000000000000000000000000000000000000000 GHCR_OWNER=example DOMAIN=test.example.com \
-  POSTGRES_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test
+  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test
 cfg=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json)
+pcfg=$(docker compose -f proxy_server/docker-compose.yml config --format json)
 j() { echo "$cfg" | jq -e "$1" >/dev/null || { echo "FAIL: $1" >&2; exit 1; }; }
+p() { echo "$pcfg" | jq -e "$1" >/dev/null || { echo "FAIL (proxy): $1" >&2; exit 1; }; }
 
-# Review Focus 4: no host ports except Caddy
+# Review Focus 4: across the whole stack, exactly 80 and 443 are published, both by proxy-caddy
+p '.services.caddy.container_name == "proxy-caddy" and .services.caddy.image == "caddy:2-alpine"'
+p '[.services.caddy.ports[].published | tonumber] | sort == [80, 443]'
+all=$( (echo "$cfg"; echo "$pcfg") | jq -s '[.[].services[] | (.ports // [])[] | .published | tonumber] | sort')
+[ "$all" = "[80,443]" ] || { echo "FAIL: published ports across the stack are $all" >&2; exit 1; }
 j '([.services.app.ports // []] | flatten | length) == 0'
 j '([.services.db.ports // []] | flatten | length) == 0'
 j '([.services.redis.ports // []] | flatten | length) == 0'
-j '[.services.caddy.ports[].published | tonumber] | sort == [80, 443]'
 
-# Memory budget
-j '(.services.app.mem_limit | tonumber) == 1073741824'
-j '(.services.db.mem_limit | tonumber) == 2147483648'
-j '(.services.redis.mem_limit | tonumber) == 335544320'
-j '(.services.caddy.mem_limit | tonumber) == 134217728'
+# CPU and memory caps (tech decisions, "Container resource limits")
+j '(.services.app.cpus | tonumber) == 1.5 and (.services.app.mem_limit | tonumber) == 1073741824'
+j '(.services.db.cpus | tonumber) == 2.0 and (.services.db.mem_limit | tonumber) == 2147483648'
+j '(.services.redis.cpus | tonumber) == 0.5 and (.services.redis.mem_limit | tonumber) == 335544320'
+p '(.services.caddy.cpus | tonumber) == 0.5 and (.services.caddy.mem_limit | tonumber) == 134217728'
+
+# Postgres data is a bind mount on the data volume, not a named volume
+j '[.services.db.volumes[] | select(.target == "/var/lib/postgresql/data") | .type] == ["bind"]'
 
 # Redis cap and eviction
 j '(.services.redis.command | if type == "array" then join(" ") else . end) | contains("--maxmemory 256mb") and contains("--maxmemory-policy allkeys-lru")'
 
-# Network isolation: app is on edge and backend; db and redis only on backend
-j '(.services.app.networks | keys | sort) == ["backend", "edge"]'
+# Network isolation: app is on shared and backend; db and redis only on backend; proxy only on shared
+j '(.services.app.networks | keys | sort) == ["backend", "shared"]'
+j '.networks.shared.external == true'
 j '(.services.db.networks | keys) == ["backend"]'
 j '(.services.redis.networks | keys) == ["backend"]'
-j '(.services.caddy.networks | keys) == ["edge"]'
+p '(.services.caddy.networks | keys) == ["shared"]'
 
 echo "prod compose OK"
 ```
@@ -550,14 +562,15 @@ echo "prod compose OK"
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `bash scripts/tests/prod-compose.test.sh`
-Expected: FAIL on the first assertion that depends on `caddy` or the override, for example `FAIL: .services.caddy.ports[]...` or a `docker compose` error "no such file" for `docker-compose.prod.yml`.
+Expected: FAIL, a `docker compose` error "no such file" for `docker-compose.prod.yml` or `proxy_server/docker-compose.yml`, or a failed `caddy` or override assertion.
 
 - [ ] **Step 3: Implement**
 
-- `deploy/Caddyfile`: site block as described, with `{$DOMAIN}` as the address. Add `header { -Server }` to strip the server banner. No other directives.
+- `proxy_server/Caddyfile` and `proxy_server/docker-compose.yml`: as in Interfaces. Add `header { -Server }` to strip the server banner. Run `proxy_server/create-shared-network.sh` once on the host before the first `up` of either stack; the app's compose fails without the external `shared` network.
 - Base `docker-compose.yml`: change only `redis.command` to the value in Interfaces. Keep the healthcheck and volume.
 - `docker-compose.prod.yml`: as in Interfaces. `!reset` and `!override` require Compose v2.24.4 or later; the bootstrap script in Task 5 installs the current plugin.
-- Validate the Caddyfile once: `docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=test.example.com caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile`. Expected: `Valid configuration`.
+- Validate the Caddyfile once: `docker run --rm -v "$PWD/proxy_server/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=test.example.com -e ACME_EMAIL=ops@example.com caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile`. Expected: `Valid configuration`.
+- On the host, the proxy runs from `/home/ubuntu/docker/proxy_server/` (owner decision; inside the project root, as its own compose stack). Stopping the app stack never removes the proxy's volumes.
 
 - [ ] **Step 4: Verify**
 
@@ -567,8 +580,8 @@ Expected: `prod compose OK`.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add deploy/Caddyfile docker-compose.yml docker-compose.prod.yml scripts/tests/prod-compose.test.sh
-git commit -m "feat: add Caddy edge, prod compose override, memory limits, and Redis cap
+git add proxy_server/Caddyfile proxy_server/docker-compose.yml docker-compose.yml docker-compose.prod.yml scripts/tests/prod-compose.test.sh
+git commit -m "feat: add shared Caddy proxy, prod compose override, resource caps, and Redis cap
 
 Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 ```
@@ -584,20 +597,20 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: Ubuntu LTS on `c7i.xlarge`, `ap-south-1`; root gp3 volume 60 GiB; an attached EBS gp3 data volume of 100 GiB (device `PGDATA_DEVICE`, default `/dev/nvme1n1`).
 - Produces:
-  - `scripts/ec2-bootstrap.sh` (run once as root, safe to re-run). Idempotent steps: Docker Engine and Compose plugin from Docker's apt repo; `deploy` user (docker group, key-only login, public key from `DEPLOY_PUBLIC_KEY`); 2 GiB swap at `/swapfile` with `vm.swappiness=10`; format `PGDATA_DEVICE` only if `blkid` shows no filesystem, mount at `/mnt/pgdata` by UUID in `/etc/fstab`; `/opt/food-os` owned by `deploy`; UFW: default deny incoming, allow `22/tcp`, `80/tcp`, `443/tcp`, enable; `unattended-upgrades` enabled.
+  - `scripts/ec2-bootstrap.sh` (run once as root, safe to re-run). Idempotent steps: Docker Engine and Compose plugin from Docker's apt repo; `deploy` user (docker group, key-only login, public key from `DEPLOY_PUBLIC_KEY`); 2 GiB swap at `/swapfile` with `vm.swappiness=10`; format `PGDATA_DEVICE` only if `blkid` shows no filesystem, mount at `/home/ubuntu/docker/data` by UUID in `/etc/fstab` with `nofail`; `/home/ubuntu/docker` owned by `deploy`; UFW: default deny incoming, allow `22/tcp`, `80/tcp`, `443/tcp`, enable; `unattended-upgrades` enabled.
   - `scripts/verify-host.sh` exits 0 only when all checks pass; prints one line per check.
 
 - [ ] **Step 1: Write the verification script first (this is the failing test)**
 
 `scripts/verify-host.sh` checks, each printing `PASS` or `FAIL`:
 1. `ufw status | grep -q "Status: active"`.
-2. Publicly listening TCP ports are exactly `22 80 443` (Review Focus 4): `ss -tln | awk 'NR>1 {print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|\*):' | sed 's/.*://' | sort -u` must equal the three numbers. Loopback-bound Docker ports are excluded by design.
+2. Publicly listening TCP ports are exactly `22 80 443` (Review Focus 4): `ss -tln | awk 'NR>1 {print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|\*):' | sed 's/.*://' | sort -u` must equal the three numbers. Loopback-bound Docker ports are excluded by design; the shared proxy's 80 and 443 are the only Docker-published ports.
 3. `swapon --show=SIZE --bytes --noheadings` total is at least `2147483648`.
-4. `findmnt -n -o SOURCE /mnt/pgdata` succeeds and the source is not the root device.
+4. `findmnt -n -o SOURCE /home/ubuntu/docker/data` succeeds and the source is not the root device.
 5. `docker compose version` reports v2.24.4 or later.
 6. `id deploy` shows `docker` group membership; `sudo -u deploy docker ps` exits 0.
 7. `sshd -T | grep -q '^passwordauthentication no$'`.
-8. `df --output=avail -B1G /mnt/pgdata | tail -1` is at least `20` (pg_dump scratch headroom, Global Constraints).
+8. `df --output=avail -B1G /home/ubuntu/docker/data | tail -1` is at least `20` (pg_dump scratch headroom, Global Constraints).
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -609,7 +622,7 @@ Expected: exit 1, with at least checks 1, 3, 4, and 6 printing `FAIL`.
 - `set -euo pipefail`; refuse to run unless `id -u` is 0.
 - Use the official Docker apt repository (`download.docker.com/linux/ubuntu`), packages `docker-ce docker-ce-cli containerd.io docker-compose-plugin`.
 - Swap: create `/swapfile` with `fallocate -l 2G` only if absent; `chmod 600`; `mkswap`; `swapon`; append to `/etc/fstab` only if the line is missing.
-- EBS: if `blkid "$PGDATA_DEVICE"` prints nothing, run `mkfs.ext4 -L pgdata "$PGDATA_DEVICE"`; mount point `/mnt/pgdata`; add the fstab line by `UUID=` only if absent.
+- EBS: if `blkid "$PGDATA_DEVICE"` prints nothing, run `mkfs.ext4 -L pgdata "$PGDATA_DEVICE"`; mount point `/home/ubuntu/docker/data`; add the fstab line by `UUID=` with `nofail` only if absent.
 - UFW: `ufw default deny incoming`, `ufw default allow outgoing`, `ufw allow 22/tcp`, `ufw allow 80/tcp`, `ufw allow 443/tcp`, `ufw --force enable`.
 - SSH: write `/etc/ssh/sshd_config.d/90-food-os.conf` with `PasswordAuthentication no` and `PermitRootLogin no`; `systemctl reload ssh`.
 - Instance profile (set in AWS, not in the script; document here): IAM role with `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`, `logs:DescribeLogStreams` on `/food-os/*`, and `s3:PutObject`, `s3:GetObject`, `s3:ListBucket` on `<BACKUP_BUCKET>` (`pg/*`). Security group inbound: 22 from the owner's IP only; 80 and 443 from anywhere.
@@ -633,10 +646,10 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 ### Task 6: Backups, Retention, Systemd Timers, and Restore Check
 
 **Files:**
-- Create: `scripts/backup-pg.sh`, `scripts/restore-check.sh`, `scripts/tests/backup-restore.test.sh`, `deploy/s3-lifecycle.json`, `deploy/systemd/food-os-backup.service`, `deploy/systemd/food-os-backup.timer`, `deploy/systemd/food-os-restore-check.service`, `deploy/systemd/food-os-restore-check.timer`
+- Create: `scripts/backup-pg.sh`, `scripts/restore-check.sh`, `scripts/tests/backup-restore.test.sh`, `deploy/s3-lifecycle.json`, `deploy/systemd/food-os-backup.service`, `deploy/systemd/food-os-backup.timer`, `deploy/systemd/food-os-restore-check.service`, `deploy/systemd/food-os-restore-check.timer`, `scripts/caddy-data-backup.sh`, `deploy/systemd/food-os-caddy-backup.service`, `deploy/systemd/food-os-caddy-backup.timer`
 
 **Interfaces:**
-- Consumes: `db` container (`food_os` database; decision 2); roles `food_backup` and `food_admin` (created by the one-time role bootstrap below); `BACKUP_DB_PASSWORD` (in `/opt/food-os/.env`, mode `600`); `BACKUP_TARGET` (`s3://bucket/prefix` in production, or `file:///dir` for tests only); `AWS_REGION=ap-south-1`.
+- Consumes: `db` container (`food_os` database; decision 2); roles `food_backup` and `food_admin` (created by the one-time role bootstrap below); `BACKUP_DB_PASSWORD` (in `/home/ubuntu/docker/.env`, mode `600`); `BACKUP_TARGET` (`s3://bucket/prefix` in production, or `file:///dir` for tests only); `AWS_REGION=ap-south-1`.
 - Produces:
   - Role bootstrap (one time, superuser, run by the instance owner; documented here as the only step that needs the bootstrap login `food`): `docker compose exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" db psql -U food -d postgres -v ON_ERROR_STOP=1 -v pw="$BACKUP_DB_PASSWORD"` with stdin set to this SQL, which is idempotent:
     ```sql
@@ -649,8 +662,11 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
     Re-running it changes nothing except re-setting the same password. Verify the grants in Task 6 Step 4.
   - `scripts/backup-pg.sh`: runs `pg_dump -Fc -U food_backup food_os` inside `db` via `docker compose exec -T -e PGPASSWORD="$BACKUP_DB_PASSWORD" db`. Writes `pg/food_os-<UTC timestamp>.dump` and a sidecar `pg/food_os-<UTC timestamp>.counts.json` containing exact row counts of `restaurant_nodes`, `menu_items`, `menu_categories`, `dining_tables`, `tabletop_sessions`, `kds_tickets`, `mesh_food_auctions`, `verified_customer_ratings`, taken from the same snapshot (run the counts inside the same `pg_dump` transaction via `--snapshot` or by dumping counts in a `REPEATABLE READ` transaction). Uploads both with `aws s3 cp` (or copies with `cp` for `file://`). Exit non-zero on any failure.
   - `scripts/restore-check.sh <dump-uri-or-path>`: copies the dump into the `db` container, creates `food_os_restore_check`, runs `pg_restore --no-owner --exit-on-error` as `food_admin` (the only step that uses `food_admin`), counts the same tables as `food_backup`, compares with the sidecar manifest; drops the scratch database in a `trap`. Prints `restore check OK` and exits 0 only on exact equality for every table (Review Focus 5). Prints per-table mismatches and exits 1 otherwise.
-  - `deploy/s3-lifecycle.json`: rule `expire-pg-14d`, prefix `pg/`, `Expiration: { Days: 14 }`, applied with `aws s3api put-bucket-lifecycle-configuration`.
-  - systemd: `food-os-backup.timer` with `OnCalendar=*-*-* 21:00:00 UTC` and `Persistent=true`; service runs `/opt/food-os/scripts/backup-pg.sh` as `deploy` with `EnvironmentFile=/opt/food-os/.env`. `food-os-restore-check.timer` with `OnCalendar=*-*-03 04:00:00 UTC`, `Persistent=true`; service runs `restore-check.sh` on the latest key (`scripts/restore-check.sh latest`, which resolves the newest `pg/*.dump` by name).
+  - `deploy/s3-lifecycle.json`: rule `expire-pg-14d`, prefix `pg/`, `Expiration: { Days: 14 }`, and rule `expire-caddy-14d`, prefix `caddy/`, the same expiration; applied with `aws s3api put-bucket-lifecycle-configuration`.
+  - systemd: `food-os-backup.timer` with `OnCalendar=*-*-* 21:00:00 UTC` and `Persistent=true`; service runs `/home/ubuntu/docker/scripts/backup-pg.sh` as `deploy` with `EnvironmentFile=/home/ubuntu/docker/.env` and `WorkingDirectory=/home/ubuntu/docker` (all units set this). `food-os-restore-check.timer` with `OnCalendar=*-*-03 04:00:00 UTC`, `Persistent=true`; service runs `restore-check.sh` on the latest key (`scripts/restore-check.sh latest`, which resolves the newest `pg/*.dump` by name), then `scripts/caddy-data-backup.sh check latest`.
+  - Gap B, `proxy-caddy-data` backup: `scripts/caddy-data-backup.sh backup` runs as `deploy`. It archives the volume read-only with `docker run --rm -v proxy-caddy-data:/data:ro -v "$dir:/out" alpine tar -C /data -czf /out/caddy-data-<UTC timestamp>.tar.gz .`, where `$dir` is a `mktemp -d` under `BACKUP_SCRATCH` removed by a `trap`. It uploads with `aws s3 cp` to `s3://<BACKUP_BUCKET>/caddy/`. The archive holds certificates and ACME account keys, so the bucket must stay private. Losing the volume forces certificate re-issue.
+  - Restore check for it: `scripts/caddy-data-backup.sh check latest` downloads the newest `caddy/*.tar.gz`, extracts it into a throwaway volume (removed by a `trap`), and passes only if `caddy/acme` and `caddy/certificates` exist and are non-empty. Prints `caddy-data check OK`.
+  - systemd: `food-os-caddy-backup.timer` with `OnCalendar=Sun *-*-* 21:30:00 UTC` and `Persistent=true`; service runs the backup as `deploy` with `EnvironmentFile` and `WorkingDirectory` as above.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -708,11 +724,11 @@ Expected: FAIL, "scripts/backup-pg.sh: No such file or directory".
 
 - [ ] **Step 3: Implement**
 
-- Follow the Interfaces exactly. Use `set -euo pipefail`, quote every variable, and write dumps under `mktemp -d` inside `BACKUP_SCRATCH` (default `/mnt/pgdata/backup-scratch`, on the data volume, not the root volume) and remove it on exit with `trap`. Before dumping, refuse to run when less than `MIN_FREE_GIB` (default `20`) GiB is free on that filesystem, keeping the pg_dump headroom from Global Constraints. Tests set `MIN_FREE_GIB=0`.
+- Follow the Interfaces exactly. Use `set -euo pipefail`, quote every variable, and write dumps under `mktemp -d` inside `BACKUP_SCRATCH` (default `/home/ubuntu/docker/data/backup-scratch`, on the data volume, not the root volume) and remove it on exit with `trap`. Before dumping, refuse to run when less than `MIN_FREE_GIB` (default `20`) GiB is free on that filesystem, keeping the pg_dump headroom from Global Constraints. Tests set `MIN_FREE_GIB=0`.
 - `BACKUP_TARGET=file://` is accepted only so the test can run without AWS; the script refuses `file://` when `NODE_ENV=production` is set in the environment.
 - `restore-check.sh latest` on S3 uses `aws s3 ls` sorted by key and picks the last `*.dump`.
 - Apply the lifecycle rule once: `aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-configuration file://deploy/s3-lifecycle.json`. Verify: `aws s3api get-bucket-lifecycle-configuration --bucket "$BUCKET"` shows `Days: 14`.
-- Install the four systemd units to `/etc/systemd/system/`, then `systemctl daemon-reload && systemctl enable --now food-os-backup.timer food-os-restore-check.timer`.
+- Install the six systemd units to `/etc/systemd/system/`, then `systemctl daemon-reload && systemctl enable --now food-os-backup.timer food-os-restore-check.timer food-os-caddy-backup.timer`.
 
 - [ ] **Step 4: Verify**
 
@@ -735,17 +751,17 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 ### Task 7: GitHub Actions Pipeline and Remote Deploy with Rollback
 
 **Files:**
-- Create: `.github/workflows/deploy.yml`, `deploy/deploy.sh` (installed to `/opt/food-os/deploy.sh` on the host)
+- Create: `.github/workflows/deploy.yml`, `deploy/deploy.sh` (installed to `/home/ubuntu/docker/deploy.sh` on the host)
 - Test: `scripts/tests/rollback-drill.sh` (run on the instance)
 
 **Interfaces:**
-- Consumes: `docker-compose.yml` and `docker-compose.prod.yml` on the host at `/opt/food-os/`; `/opt/food-os/.env` with `IMAGE_TAG`, `GHCR_OWNER`, `DOMAIN`, `POSTGRES_PASSWORD`, `PGDATA_DIR`; GitHub secrets `EC2_HOST`, `EC2_USER` (`deploy`), `EC2_SSH_KEY`, `DOMAIN`; host-side GHCR pull token in `/opt/food-os/.env` as `GHCR_TOKEN` with `read:packages` (login run by `deploy.sh`).
+- Consumes: `docker-compose.yml` and `docker-compose.prod.yml` on the host at `/home/ubuntu/docker/`; the shared proxy (`proxy_server/`, run from `/home/ubuntu/docker/proxy_server/`, started separately and not by `deploy.sh`) must already be up, and the external `shared` network must exist; `/home/ubuntu/docker/.env` with `IMAGE_TAG`, `GHCR_OWNER`, `DOMAIN`, `POSTGRES_PASSWORD`, `PGDATA_DIR`; GitHub secrets `EC2_HOST`, `EC2_USER` (`deploy`), `EC2_SSH_KEY`, `DOMAIN`; host-side GHCR pull token in `/home/ubuntu/docker/.env` as `GHCR_TOKEN` with `read:packages` (login run by `deploy.sh`).
 - Produces:
   - Workflow `deploy.yml`, triggered on push to `main`, with concurrency group `deploy-prod` and `cancel-in-progress: false`. Jobs:
-    1. `test`: Node 22, `npm ci`, `npm run typecheck`, `npm test` with service containers `postgis/postgis:16-3.4` (env `POSTGRES_PASSWORD=ci`, `POSTGRES_USER=food`, `POSTGRES_DB=food_os`) and `redis:7-alpine`; `DATABASE_URL` and `REDIS_URL` point at them.
-    2. `e2e`: needs `test`; `docker compose up -d --build --wait` with `POSTGRES_PASSWORD=ci`; `npx tsx scripts/seed.ts`; `npx playwright install --with-deps chromium`; `npx playwright test`; uploads the Playwright report on failure.
+    1. `test`: job `container: node:22-alpine`, so Node runs in a container; `npm ci`, `npm run typecheck`, `npm test` with service containers `postgis/postgis:16-3.4` (env `POSTGRES_PASSWORD=ci`, `POSTGRES_USER=food`, `POSTGRES_DB=food_os`) and `redis:7-alpine`; `DATABASE_URL` and `REDIS_URL` point at them.
+    2. `e2e`: needs `test`; creates `shared` with `proxy_server/create-shared-network.sh` if missing; `docker compose up -d --build --wait` with `POSTGRES_PASSWORD=ci`; seeds with `npx tsx scripts/seed.ts` in a `node:22-alpine` container on `--network host`; runs Playwright in the Playwright image attached to `shared` with `E2E_BASE_URL=http://food-os-app:3000` (Gap A: the app publishes no host port, so the job reaches it by container name); uploads the Playwright report on failure.
     3. `build`: needs `test`; `docker/login-action` to `ghcr.io` with `GITHUB_TOKEN`; `docker/build-push-action` with `push: true`, tag `ghcr.io/${{ github.repository_owner }}/food-os:sha-${{ github.sha }}`, and GHA layer cache. Lowercase the owner in a step (GHCR rejects uppercase).
-    4. `deploy`: needs `build`; `environment: production`; writes `EC2_SSH_KEY` to a `0600` file; runs `ssh -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_HOST" "/opt/food-os/deploy.sh sha-$GITHUB_SHA"`; then `curl -fsS --retry 5 --retry-delay 5 https://$DOMAIN/api/health | grep -q '"ok":true'`.
+    4. `deploy`: needs `build`; `environment: production`; writes `EC2_SSH_KEY` to a `0600` file; runs `ssh -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_HOST" "/home/ubuntu/docker/deploy.sh sha-$GITHUB_SHA"`; then `curl -fsS --retry 5 --retry-delay 5 https://$DOMAIN/api/health | grep -q '"ok":true'`.
   - `deploy/deploy.sh <sha-tag>`: pulls and starts `app` with the new tag, waits for the in-container health check, and rolls back to the last good tag on failure. Writes `state/current_tag` on success and `state/previous_tag` for manual rollback. Exit `0` on success, `1` after a failed deploy (rollback attempted), `2` on bad usage.
 
 Deploy script core logic (fixed):
@@ -755,7 +771,7 @@ Deploy script core logic (fixed):
 set -euo pipefail
 NEW="${1:?usage: deploy.sh sha-<40-hex>}"
 case "$NEW" in sha-*) ;; *) echo "tag must be sha-<commit>" >&2; exit 2;; esac
-DIR=/opt/food-os; STATE="$DIR/state"; mkdir -p "$STATE"
+DIR=/home/ubuntu/docker; STATE="$DIR/state"; mkdir -p "$STATE"
 COMPOSE=(docker compose -f "$DIR/docker-compose.yml" -f "$DIR/docker-compose.prod.yml" --env-file "$DIR/.env")
 CURRENT=$(cat "$STATE/current_tag" 2>/dev/null || true)
 
@@ -795,21 +811,21 @@ Before `deploy_tag` the script also runs `echo "$GHCR_TOKEN" | docker login ghcr
 #!/usr/bin/env bash
 # scripts/tests/rollback-drill.sh   (run on the instance after the first good deploy)
 set -euo pipefail
-good=$(cat /opt/food-os/state/current_tag)
+good=$(cat /home/ubuntu/docker/state/current_tag)
 bad=sha-0000000000000000000000000000000000000000   # does not exist in GHCR
-if /opt/food-os/deploy.sh "$bad"; then echo "FAIL: bad tag deployed" >&2; exit 1; fi
-grep -q "IMAGE_TAG=$good" /opt/food-os/.env
-[ "$(cat /opt/food-os/state/current_tag)" = "$good" ]
+if /home/ubuntu/docker/deploy.sh "$bad"; then echo "FAIL: bad tag deployed" >&2; exit 1; fi
+grep -q "IMAGE_TAG=$good" /home/ubuntu/docker/.env
+[ "$(cat /home/ubuntu/docker/state/current_tag)" = "$good" ]
 curl -fsS https://"$DOMAIN"/api/health | grep -q '"ok":true'
 echo "rollback drill OK"
 ```
 
 Run: `bash scripts/tests/rollback-drill.sh`
-Expected before implementation: FAIL, "/opt/food-os/deploy.sh: No such file or directory" (exit 1).
+Expected before implementation: FAIL, "/home/ubuntu/docker/deploy.sh: No such file or directory" (exit 1).
 
 - [ ] **Step 2: Implement**
 
-- Write `deploy/deploy.sh` exactly as in the Produces logic and install it to `/opt/food-os/deploy.sh` (mode `755`, owner `deploy`).
+- Write `deploy/deploy.sh` exactly as in the Produces logic and install it to `/home/ubuntu/docker/deploy.sh` (mode `755`, owner `deploy`).
 - Write `.github/workflows/deploy.yml` per the Produces job list. Pin actions to major versions (`actions/checkout@v4`, `actions/setup-node@v4`, `docker/login-action@v3`, `docker/build-push-action@v6`). Use `permissions: contents: read, packages: write` at the workflow level.
 - The `deploy` job must not run when `test` or `build` fails (default `needs` behavior).
 
@@ -833,13 +849,13 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 ### Task 8: External Uptime Check and CloudWatch Logs
 
 **Files:**
-- Modify: `docker-compose.prod.yml` (add `logging` to every service)
+- Modify: `docker-compose.prod.yml` (add `logging` to `app`, `db`, `redis`), `proxy_server/docker-compose.yml` (add `logging` to `caddy`)
 - Create: `scripts/tests/logging.test.sh`
 
 **Interfaces:**
 - Consumes: `IMAGE_TAG` and other env from Task 4; instance profile logs permissions from Task 5.
 - Produces:
-  - Every service in `docker-compose.prod.yml` has `logging: { driver: awslogs, options: { awslogs-region: ap-south-1, awslogs-group: /food-os/prod, awslogs-stream: <service name>, awslogs-create-group: "true" } }`.
+  - Every service in both compose files (`app`, `db`, `redis` in `docker-compose.prod.yml`; `caddy` in `proxy_server/docker-compose.yml`) has `logging: { driver: awslogs, options: { awslogs-region: ap-south-1, awslogs-group: /food-os/prod, awslogs-stream: <service name>, awslogs-create-group: "true" } }`.
   - CloudWatch log group `/food-os/prod` with retention 30 days (`aws logs put-retention-policy --log-group-name /food-os/prod --retention-in-days 30`).
   - External uptime monitor. Owner creates the account; the plan documents the URL and the check settings: URL `https://<DOMAIN>/api/health`, check interval 5 minutes (free tiers do not offer 1-minute checks), keyword `"ok":true`, alerts to the owner's email and phone.
   - CloudWatch alarm as backup: name `food-os-status-check`, namespace `AWS/EC2`, metric `StatusCheckFailed`, dimension `InstanceId=<INSTANCE_ID>`, statistic `Maximum`, period 300 s, 2 evaluation periods, threshold `0`, `GreaterThanThreshold`, action `<ALERT_SNS_TOPIC_ARN>` (an SNS topic the owner creates).
@@ -851,9 +867,10 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 # scripts/tests/logging.test.sh
 set -euo pipefail
 export IMAGE_TAG=sha-0000000000000000000000000000000000000000 GHCR_OWNER=example DOMAIN=test.example.com \
-  POSTGRES_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test
+  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test
 cfg=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json)
-for svc in app db redis caddy; do
+pcfg=$(docker compose -f proxy_server/docker-compose.yml config --format json)
+for svc in app db redis; do
   echo "$cfg" | jq -e --arg s "$svc" \
     '.services[$s].logging.driver == "awslogs"
      and .services[$s].logging.options["awslogs-group"] == "/food-os/prod"
@@ -861,6 +878,10 @@ for svc in app db redis caddy; do
      and .services[$s].logging.options["awslogs-stream"] == $s' >/dev/null \
     || { echo "FAIL: $svc logging" >&2; exit 1; }
 done
+echo "$pcfg" | jq -e '.services.caddy.logging.driver == "awslogs"
+  and .services.caddy.logging.options["awslogs-group"] == "/food-os/prod"
+  and .services.caddy.logging.options["awslogs-stream"] == "caddy"' >/dev/null \
+  || { echo "FAIL: caddy logging" >&2; exit 1; }
 retention=$(aws logs describe-log-groups --log-group-name-prefix /food-os/prod \
   --query 'logGroups[?logGroupName==`/food-os/prod`].retentionInDays | [0]' --output text)
 [ "$retention" = "30" ] || { echo "FAIL: retention is $retention" >&2; exit 1; }
@@ -874,7 +895,7 @@ Expected: FAIL, "FAIL: app logging".
 
 - [ ] **Step 3: Implement**
 
-- Add the `logging` block to the four services in `docker-compose.prod.yml` as in Produces.
+- Add the `logging` block to `app`, `db`, and `redis` in `docker-compose.prod.yml`, and to `caddy` in `proxy_server/docker-compose.yml`, as in Produces.
 - Run once on the instance: `aws logs put-retention-policy --log-group-name /food-os/prod --retention-in-days 30` (creating the group happens on first container start via `awslogs-create-group`).
 - Owner creates the uptime monitor account and sets the settings above. Create the CloudWatch alarm: `aws cloudwatch put-metric-alarm --alarm-name food-os-status-check --namespace AWS/EC2 --metric-name StatusCheckFailed --dimensions Name=InstanceId,Value=<INSTANCE_ID> --statistic Maximum --period 300 --evaluation-periods 2 --threshold 0 --comparison-operator GreaterThanThreshold --alarm-actions <ALERT_SNS_TOPIC_ARN>`. Record the monitor's name in the runbook section of the team's ops notes (not a repository file).
 
@@ -886,7 +907,7 @@ Expected: `logging OK`. Then force a failure drill: `docker compose stop app`; t
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docker-compose.prod.yml scripts/tests/logging.test.sh
+git add docker-compose.prod.yml proxy_server/docker-compose.yml scripts/tests/logging.test.sh
 git commit -m "feat: ship container logs to CloudWatch and document uptime check
 
 Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
@@ -977,7 +998,7 @@ test('refuses to seed when NODE_ENV is production', async () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `DATABASE_URL=postgres://food:change-me@localhost:5432/food_os npx vitest run tests/seed/seed.test.ts`
+Run: `docker run --rm --network host --user 1000:1000 -e HOME=/tmp -e DATABASE_URL=postgres://food:change-me@localhost:5432/food_os -v /home/ubuntu/docker:/app -w /app node:22-alpine npx vitest run tests/seed/seed.test.ts`
 Expected: FAIL, "Cannot find module '@/lib/seed/run'".
 
 - [ ] **Step 3: Implement**
@@ -989,8 +1010,8 @@ Expected: FAIL, "Cannot find module '@/lib/seed/run'".
 
 - [ ] **Step 4: Verify**
 
-Run: `DATABASE_URL=postgres://food:change-me@localhost:5432/food_os npx tsx scripts/seed.ts && DATABASE_URL=postgres://food:change-me@localhost:5432/food_os npx vitest run tests/seed/seed.test.ts`
-Expected: seed prints `restaurants=4 menuItems=<n> tables=16`; 4 tests pass; a second `tsx scripts/seed.ts` run prints the same counts.
+Run: `docker run --rm --network host --user 1000:1000 -e HOME=/tmp -e DATABASE_URL=postgres://food:change-me@localhost:5432/food_os -v /home/ubuntu/docker:/app -w /app node:22-alpine npx tsx scripts/seed.ts && docker run --rm --network host --user 1000:1000 -e HOME=/tmp -e DATABASE_URL=postgres://food:change-me@localhost:5432/food_os -v /home/ubuntu/docker:/app -w /app node:22-alpine npx vitest run tests/seed/seed.test.ts`
+Expected: seed prints `restaurants=4 menuItems=<n> tables=16`; 4 tests pass; a second seed run prints the same counts.
 
 - [ ] **Step 5: Commit**
 
@@ -1015,7 +1036,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
   - Plan 03 dine-in route `/dine/[restaurantId]/[tableNumber]?sig=<signature>` exists (Plan 03 `TableSessionGate`, `sig` query parameter). The test ids `add-item-<pos_item_code>` and `kds-ticket` are NOT defined in Plan 03; they are required from Task 11.
   - Plan 02 delivery route `/delivery` and `POST /api/delivery/intent` exist (Plan 02). The `?lat=&lng=` override, the `Voice search` label, the `Find food` button, and the `bundle-card` attributes are NOT defined in Plan 02; they are required from Task 11.
 - Produces:
-  - `playwright.config.ts`: `testDir: 'e2e'`; `baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:3000'`; project `chromium` using the `Pixel 7` device profile (mobile-first); `trace: 'retain-on-failure'`; `workers` default; `reporter: [['list'], ['html', { open: 'never' }]]`.
+  - `playwright.config.ts`: `testDir: 'e2e'`; `baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:3000'`; project `chromium` using the `Pixel 7` device profile (mobile-first); `trace: 'retain-on-failure'`; `workers` default; `reporter: [['list'], ['html', { open: 'never' }]]`. The run commands set `E2E_BASE_URL=http://food-os-app:3000` (Gap A decision, Task 7); the `localhost` default is only for a host-run dev server.
   - Spec 1 (dine-in isolation): two browser contexts at two tables of `FIXTURE_RESTAURANTS[0]` order different items at the same moment and each sees only its own ticket.
   - Spec 2 (delivery auction): one voice query returns at least two ranked bundles from at least two different seeded kitchens, each priced at or under `₹800`.
 
@@ -1093,20 +1114,20 @@ test('one voice query returns ranked bundles from several seeded kitchens', asyn
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `docker compose up -d --wait && DATABASE_URL=postgres://food:change-me@localhost:5432/food_os npx tsx scripts/seed.ts && npx playwright test`
+Run: `docker compose up -d --wait && docker run --rm --network host --user 1000:1000 -e HOME=/tmp -e DATABASE_URL=postgres://food:change-me@localhost:5432/food_os -v /home/ubuntu/docker:/app -w /app node:22-alpine npx tsx scripts/seed.ts && docker run --rm --network shared --user 1000:1000 -e HOME=/tmp -e E2E_BASE_URL=http://food-os-app:3000 -v /home/ubuntu/docker:/app -w /app mcr.microsoft.com/playwright:<pinned @playwright/test version> npx playwright test`
 Expected before Plans 02 and 03 exist: both specs FAIL with a 404 or a timeout on `getByTestId('add-item-IND1-PNR-TIKKA')` or `getByTestId('bundle-card')`. A spec that fails for a missing route or test id is the expected failure.
 
 - [ ] **Step 3: Implement**
 
 - `playwright.config.ts` per Produces.
-- Add `@playwright/test` (`npm i -D @playwright/test`) and `"e2e": "playwright test"` to `package.json` scripts.
+- Add `@playwright/test` (`docker run --rm --network host --user 1000:1000 -e HOME=/tmp -v /home/ubuntu/docker:/app -w /app node:22-alpine npm i -D @playwright/test`) and `"e2e": "playwright test"` to `package.json` scripts.
 - The `tsconfig.json` path alias `@/*` is picked up by Playwright; no extra config.
 - Do not add retries in the config; flaky timing belongs in the test, not hidden by retries.
 - This task does not add the Plan 02 or Plan 03 test hooks. Task 11 lists them; both specs fail until they exist.
 
 - [ ] **Step 4: Verify**
 
-Run: `npm run e2e`
+Run: `docker run --rm --network shared --user 1000:1000 -e HOME=/tmp -e E2E_BASE_URL=http://food-os-app:3000 -v /home/ubuntu/docker:/app -w /app mcr.microsoft.com/playwright:<pinned @playwright/test version> npm run e2e`
 Expected: 2 passed, after Plans 02 and 03 are built. Run it three times in a row; all pass each time.
 
 - [ ] **Step 5: Commit**
@@ -1147,7 +1168,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 2: Verify through the E2E suite**
 
-  Run: `npm run e2e` (Task 10 Step 4). Expected: both specs pass. Until the hooks exist, the specs fail on a missing test id, which is the expected result.
+  Run: the Task 10 Step 4 e2e command. Expected: both specs pass. Until the hooks exist, the specs fail on a missing test id, which is the expected result.
 
 No commit in this plan. The hooks are committed under Plans 02 and 03.
 
@@ -1167,19 +1188,19 @@ Capacitor is item (k). It is documented here so the path is clear, and it is not
 
 ## Acceptance for Plan 07
 
-- `npm test` passes all suites, including rate limiter (bucket, Redis store, keys, guard), HTTP (body, security), seed, and the Plan 01 suites.
-- `bash scripts/tests/prod-compose.test.sh` prints `prod compose OK`: app, db, and redis publish no host ports; only Caddy binds 80 and 443; memory limits and the Redis cap match the budget.
-- `bash scripts/verify-host.sh` exits 0 on the instance: publicly listening ports are exactly 22, 80, 443; 2 GiB swap is active; `/mnt/pgdata` is a separate mount with at least 20 GiB free; `deploy` can run Docker.
-- `bash scripts/tests/backup-restore.test.sh` prints `backup-restore OK`; the S3 lifecycle rule shows 14 days; both systemd timers are listed and enabled.
+- `npm test` (containerised, per Global Constraints) passes all suites, including rate limiter (bucket, Redis store, keys, guard), HTTP (body, security), seed, and the Plan 01 suites.
+- `bash scripts/tests/prod-compose.test.sh` prints `prod compose OK`: app, db, and redis publish no host ports; across the stack only `proxy-caddy` publishes, exactly 80 and 443; CPU and memory caps, the bind-mounted Postgres data, and the Redis cap match the budget.
+- `bash scripts/verify-host.sh` exits 0 on the instance: publicly listening ports are exactly 22, 80, 443; 2 GiB swap is active; `/home/ubuntu/docker/data` is a separate mount with at least 20 GiB free; `deploy` can run Docker.
+- `bash scripts/tests/backup-restore.test.sh` prints `backup-restore OK`; the S3 lifecycle rules show 14 days for `pg/` and `caddy/`; all three systemd timers are listed and enabled; `scripts/caddy-data-backup.sh check latest` prints `caddy-data check OK`.
 - The `deploy` workflow runs green on `main`, and `curl -fsS https://<DOMAIN>/api/health` returns `{"ok":true}` from the EC2 instance.
 - `bash scripts/tests/rollback-drill.sh` prints `rollback drill OK`.
 - `bash scripts/tests/logging.test.sh` prints `logging OK`; the external uptime monitor (5-minute check) shows UP and alerts when `app` is stopped in the drill, and the CloudWatch alarm `food-os-status-check` exists.
-- `npx tsx scripts/seed.ts` run twice leaves identical counts (4 restaurants, 16 tables).
-- `npm run e2e` passes both specs, three runs in a row.
+- The seed script, run twice, leaves identical counts (4 restaurants, 16 tables).
+- The Task 10 e2e command passes both specs, three runs in a row.
 
 ## Unresolved Gaps (carry to the owner or to other plans)
 
-1. Domain name for `DOMAIN` is not given. Caddy TLS and the health check need it.
+1. Domain name for `DOMAIN` is still needed. Let's Encrypt certificates (Caddy, with `ACME_EMAIL` for expiry notices) and the health check need it.
 2. Owner creates the external uptime monitor account. The plan documents the URL and the check settings: 5-minute interval, since free tiers do not offer 1-minute checks (decision 5).
 3. GHCR pull token (`read:packages`) for the host must be created by the owner.
 4. Plans 02 and 03 must provide the test hooks listed in Task 11. Neither plan defines them yet.
@@ -1188,3 +1209,7 @@ Capacitor is item (k). It is documented here so the path is clear, and it is not
 7. Cloudflare WAF is deferred per tech decisions. Switching the client-IP source to `CF-Connecting-IP` is a one-line Caddy change when it lands.
 8. Migrations must stay expand-only for the rollback path to be safe. Plans 02 to 06 must follow this rule.
 9. Nonce-based CSP is deferred; the current policy uses `unsafe-inline` for scripts and styles.
+10. Resolved (Gap B): Task 6 archives `proxy-caddy-data` weekly to `caddy/` with a 14-day lifecycle and a restore check (`scripts/caddy-data-backup.sh check`).
+11. Resolved (Gap A): Playwright runs in a container on `shared` with `E2E_BASE_URL=http://food-os-app:3000`, in CI and locally (Task 7 and Task 10).
+12. Host layout: the shared proxy runs from `/home/ubuntu/docker/proxy_server/` (binding project location). `deploy.sh` does not manage the proxy.
+13. Logging conflict: Task 8 switches `app`, `db`, `redis`, and `caddy` to the `awslogs` driver, while Global Constraints and tech decisions require a bounded json-file log (`max-size` 10m, `max-file` 3). Owner or engineering to choose; both stay in the plan until decided. The Caddy `mem_reservation` (64m) and `pids_limit` (128) values are proposed, not from tech decisions; confirm them.

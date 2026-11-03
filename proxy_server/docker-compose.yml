@@ -1,0 +1,28 @@
+# Shared reverse proxy. The only service that publishes host ports (80, 443).
+# App stacks join the external network "shared" and use `expose` only.
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: proxy-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN to the public hostname that points at this EC2 IP}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL for Let's Encrypt notices}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - shared
+    mem_limit: 128m
+
+networks:
+  shared:
+    external: true
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}

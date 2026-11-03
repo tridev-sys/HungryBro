@@ -993,7 +993,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/food-os
+WorkingDirectory=/home/ubuntu/docker
 ExecStart=/usr/bin/docker compose exec -T app node dist-scripts/scripts/pos-nightly-sync.js
 ```
 
