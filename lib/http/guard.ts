@@ -1,6 +1,9 @@
 import { LIMITS } from '@/lib/ratelimit/limits';
 import { bucketKeyForIp, bucketKeyForSession, clientIpFromHeaders } from '@/lib/ratelimit/keys';
-import type { RedisRateLimitStore } from '@/lib/ratelimit/redis-store';
+import { RedisRateLimitStore } from '@/lib/ratelimit/redis-store';
+import { getRedis } from '@/lib/redis';
+import { enforceDeclaredLength, PayloadTooLargeError } from './body';
+import { withSecurityHeaders } from './security';
 
 /**
  * Checks the per-IP bucket, then the per-session bucket (when a session exists). Both must allow.
@@ -26,4 +29,41 @@ export async function guardRateLimit(
     { error: 'rate_limited' },
     { status: 429, headers: { 'Retry-After': String(Math.max(1, decision.retryAfterSeconds)) } },
   );
+}
+
+let sharedStore: RedisRateLimitStore | undefined;
+
+function defaultStore(): RedisRateLimitStore {
+  if (!sharedStore) sharedStore = new RedisRateLimitStore(getRedis());
+  return sharedStore;
+}
+
+export interface ApiGuardOptions {
+  /** Returns the raw session token for the session bucket, or null when there is no session. */
+  sessionToken?: (req: Request) => string | null;
+  /** Injected in tests; defaults to the shared Redis store. */
+  store?: RedisRateLimitStore;
+}
+
+/**
+ * Wraps an /api route handler. Order: declared-length check, rate limit, handler.
+ * Every response gets SECURITY_HEADERS. PayloadTooLargeError maps to 413.
+ */
+export function withApiGuards<C>(
+  handler: (req: Request, ctx: C) => Promise<Response>,
+  opts: ApiGuardOptions = {},
+): (req: Request, ctx: C) => Promise<Response> {
+  return async (req, ctx) => {
+    try {
+      enforceDeclaredLength(req.headers);
+      const limited = await guardRateLimit(req, opts.store ?? defaultStore(), opts.sessionToken?.(req) ?? null);
+      if (limited) return withSecurityHeaders(limited);
+      return withSecurityHeaders(await handler(req, ctx));
+    } catch (err) {
+      if (err instanceof PayloadTooLargeError) {
+        return withSecurityHeaders(Response.json({ error: 'payload_too_large' }, { status: 413 }));
+      }
+      throw err;
+    }
+  };
 }

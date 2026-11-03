@@ -1,3 +1,4 @@
+import { describe, it } from 'vitest';
 import Redis from 'ioredis';
 import { RedisRateLimitStore } from '@/lib/ratelimit/redis-store';
 import { guardRateLimit } from '@/lib/http/guard';
@@ -42,4 +43,28 @@ test('a client-sent X-Forwarded-For cannot reset its own bucket (Review Focus 2)
   }
   const r = new Request('http://localhost/api/x', { headers: { 'x-real-ip': ip, 'x-forwarded-for': '10.9.9.9' } });
   expect((await guardRateLimit(r, store, session, 0))?.status).toBe(429);
+});
+
+describe('withApiGuards body limit', () => {
+  it('returns 413 for a streamed oversize body with no Content-Length (Review Focus 3)', async () => {
+    const { withApiGuards } = await import('@/lib/http/guard');
+    const { readJsonWithLimit } = await import('@/lib/http/body');
+    const handler = withApiGuards(async (r) => Response.json({ got: await readJsonWithLimit(r) }), { store });
+    const chunk = new Uint8Array(1024);
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        for (let i = 0; i < 65; i++) c.enqueue(chunk);
+        c.close();
+      },
+    });
+    const req = new Request(`http://localhost/api/t`, {
+      method: 'POST',
+      headers: { 'x-real-ip': `192.0.2.${randomUUID()}` },
+      body,
+      duplex: 'half',
+    } as RequestInit);
+    const res = await handler(req, {});
+    expect(res.status).toBe(413);
+    expect(res.headers.get('x-frame-options')).toBe('DENY');
+  });
 });
