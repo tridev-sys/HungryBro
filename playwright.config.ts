@@ -1,9 +1,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// E2E_BASE_URL points at a running app (CI and the shared network: http://food-os-app:3000).
-// Without it, a local dev server is started on port 3100 (used by the dev-preview layout specs).
+// Base URL precedence: E2E_BASE_URL (CI and the shared network: http://food-os-app:3000), then
+// BASE_URL (a production build run in a container). When either is set, no dev server is started.
+// Without them, a local dev server is started on port 3100 (used by the dev-preview layout specs).
 const LOCAL_PORT = 3100;
-const base = process.env.E2E_BASE_URL;
+const externalBase = process.env.E2E_BASE_URL ?? process.env.BASE_URL;
+const baseURL = externalBase ?? `http://localhost:${LOCAL_PORT}`;
 
 export default defineConfig({
   testDir: '.',
@@ -13,14 +15,14 @@ export default defineConfig({
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: base ?? `http://localhost:${LOCAL_PORT}`,
+    baseURL,
     trace: 'retain-on-failure',
   },
-  webServer: base
+  webServer: externalBase
     ? undefined
     : {
         command: `npx next dev -p ${LOCAL_PORT}`,
-        url: `http://localhost:${LOCAL_PORT}`,
+        url: baseURL,
         reuseExistingServer: true,
         timeout: 120_000,
       },
