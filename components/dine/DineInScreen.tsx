@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { AppShell } from '@/components/ui/AppShell';
 import { ScreenColumns } from '@/components/ui/ScreenColumns';
 import { FilterChip } from '@/components/ui/FilterChip';
@@ -21,6 +22,10 @@ export interface DineInScreenProps {
   onActions: () => void;
   onPay: () => void;
   onCallSteward: () => void;
+  /** Optional menu list, rendered above the ticket strip. */
+  menu?: ReactNode;
+  /** Optional audio level 0..1 for the orb. Defaults to 0. */
+  orbLevel?: number;
 }
 
 /** Presentational only: Plans 02, 03 and 05 supply the props. */
@@ -37,6 +42,8 @@ export function DineInScreen({
   onActions,
   onPay,
   onCallSteward,
+  menu,
+  orbLevel,
 }: DineInScreenProps) {
   const payLabel =
     bill.shareAmount !== undefined
@@ -46,7 +53,7 @@ export function DineInScreen({
   const primary = (
     <div className="flex flex-col gap-4 pt-4">
       <div className="flex justify-center py-2">
-        <VoiceOrb state={orbState} />
+        <VoiceOrb state={orbState} level={orbLevel} />
       </div>
       <p className="rounded-[var(--radius-card)] bg-[var(--color-surface)] p-4 text-sm leading-relaxed">
         {transcript}
@@ -62,6 +69,7 @@ export function DineInScreen({
           />
         ))}
       </div>
+      {menu}
       <TicketStrip>
         {tickets.map((t) => (
           <TicketCard key={t.ticketNumber} {...t} />
