@@ -9,13 +9,13 @@ import { SESSION_COOKIE, sessionCookieOptions } from '@/lib/auth/session';
 
 export async function sendOtpAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const phone = String(formData.get('phone') ?? '');
-  return sendOtpForPhone(getPool(), selectOtpProvider(process.env), phone);
+  return sendOtpForPhone(await getPool(), selectOtpProvider(process.env), phone);
 }
 
 export async function verifyOtpAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const phone = String(formData.get('phone') ?? '');
   const code = String(formData.get('code') ?? '');
-  const result = await completeLogin(getPool(), phone, code);
+  const result = await completeLogin(await getPool(), phone, code);
   if (!result.ok) return { step: 'otp', phone, error: result.error };
 
   const jar = await cookies();

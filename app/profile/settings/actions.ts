@@ -21,25 +21,25 @@ async function requireUserId(): Promise<string> {
 
 export async function addVpaAction(_prev: ProfileFormState, formData: FormData): Promise<ProfileFormState> {
   const userId = await requireUserId();
-  const r = await addVpa(getPool(), userId, String(formData.get('vpa') ?? ''));
+  const r = await addVpa(await getPool(), userId, String(formData.get('vpa') ?? ''));
   return r.ok ? { message: 'UPI ID saved.' } : { error: VPA_ERRORS[r.reason] };
 }
 
 export async function removeVpaAction(_prev: ProfileFormState, formData: FormData): Promise<ProfileFormState> {
   const userId = await requireUserId();
-  const r = await removeVpa(getPool(), userId, String(formData.get('vpa') ?? ''));
+  const r = await removeVpa(await getPool(), userId, String(formData.get('vpa') ?? ''));
   return r.ok ? { message: 'UPI ID removed.' } : { error: VPA_ERRORS[r.reason] };
 }
 
 export async function setDefaultVpaAction(_prev: ProfileFormState, formData: FormData): Promise<ProfileFormState> {
   const userId = await requireUserId();
-  const r = await setDefaultVpa(getPool(), userId, String(formData.get('vpa') ?? ''));
+  const r = await setDefaultVpa(await getPool(), userId, String(formData.get('vpa') ?? ''));
   return r.ok ? { message: 'Default UPI ID updated.' } : { error: VPA_ERRORS[r.reason] };
 }
 
 export async function saveGstinAction(_prev: ProfileFormState, formData: FormData): Promise<ProfileFormState> {
   const userId = await requireUserId();
-  const r = await saveGstin(getPool(), userId, String(formData.get('gstin') ?? ''));
+  const r = await saveGstin(await getPool(), userId, String(formData.get('gstin') ?? ''));
   if (!r.ok) return { error: 'Enter a valid 15-character GSTIN.' };
   return { message: r.gstin ? 'GSTIN saved.' : 'GSTIN cleared.' };
 }

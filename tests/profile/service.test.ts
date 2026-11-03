@@ -1,9 +1,9 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { createUserAfterOtp } from '@/lib/auth/sign-in';
 import { addVpa, removeVpa, setDefaultVpa, listVpas, saveGstin, getProfile } from '@/lib/profile/service';
 import { randomPhone } from '../helpers/db';
 
-const pool = getPool();
+const pool = getAdminPool();
 
 beforeAll(async () => {
   process.env.OTP_HMAC_KEY = 'k'.repeat(24);

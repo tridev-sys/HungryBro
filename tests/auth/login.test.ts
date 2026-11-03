@@ -1,10 +1,10 @@
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { sendOtpForPhone, completeLogin } from '@/lib/auth/login';
 import { DevFixedCodeProvider } from '@/lib/auth/otp-providers';
 import { verifySession } from '@/lib/auth/session';
 import { randomPhone } from '../helpers/db';
 
-const pool = getPool();
+const pool = getAdminPool();
 const dev = new DevFixedCodeProvider();
 
 beforeAll(async () => {

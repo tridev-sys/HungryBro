@@ -74,7 +74,9 @@ services:
       - backend
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgres://food:${POSTGRES_PASSWORD}@db:5432/food_os
+      # Runtime login is food_app_login (not the superuser `food`). Create it once with
+      # db/bootstrap/002_app_login.sql. Row-level security applies to this role.
+      APP_DATABASE_URL: postgres://food_app_login:${APP_DB_PASSWORD:?set APP_DB_PASSWORD}@db:5432/food_os
       REDIS_URL: redis://redis:6379
     depends_on:
       db:

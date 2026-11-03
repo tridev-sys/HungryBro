@@ -1,12 +1,12 @@
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { getPool, runMigrations } from '@/lib/db/client';
+import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { POST } from '@/app/api/pos/[provider]/[restaurantId]/route';
-import { createRestaurant } from '../helpers/db';
+import { createRestaurant, ensureAppLogin } from '../helpers/db';
 
-const pool = getPool();
-beforeAll(async () => { await runMigrations(pool); });
+const pool = getAdminPool();
+beforeAll(async () => { await runMigrations(pool); await ensureAppLogin(pool); });
 afterAll(async () => { await pool.end(); });
 
 const raw = (f: string) => readFileSync(path.join(__dirname, '../fixtures/pos', f), 'utf8');

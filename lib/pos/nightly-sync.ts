@@ -34,8 +34,13 @@ export async function runNightlyMenuSync(
   pool: pg.Pool,
   fetcher: MenuFetcher,
 ): Promise<{ synced: number; failed: { restaurantId: string; error: string }[] }> {
+  // LEFT JOIN with '{}' keeps a restaurant that has no credentials row in the failure report,
+  // as before, instead of silently skipping it.
   const { rows } = await pool.query(
-    `SELECT id, pos_provider, pos_credentials FROM restaurant_nodes WHERE pos_provider <> 'direct'`,
+    `SELECT r.id, r.pos_provider, COALESCE(c.ciphertext, '{}'::jsonb) AS pos_credentials
+       FROM restaurant_nodes r
+       LEFT JOIN restaurant_pos_credentials c ON c.restaurant_id = r.id
+      WHERE r.pos_provider <> 'direct'`,
   );
   let synced = 0;
   const failed: { restaurantId: string; error: string }[] = [];
