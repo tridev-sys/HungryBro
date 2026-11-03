@@ -16,6 +16,7 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.{ts,tsx}'],
     globals: true,
+    fileParallelism: false,
     setupFiles: ['tests/setup.ts', 'tests/setup/no-network.ts', 'tests/setup/pos-key.ts'],
   },
 });
