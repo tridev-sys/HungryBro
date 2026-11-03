@@ -1,0 +1,97 @@
+# Provider verification (VERIFY markers in plans 05 and 06, plus voice providers)
+
+Checked: 2026-11-03. Repo base: `dev` at `b7a2d20` (the task started at `75beeb6`; `dev` moved during the run, the repo values below were read from `dev` at `b7a2d20`).
+
+Method: official docs fetched with WebFetch and read directly, plus WebSearch restricted to official domains. Where an official page was unreachable, redirected to a login page, or gave no detail, the item is marked NOT VERIFIED with the reason. Third-party write-ups are noted but are not treated as verified.
+
+Matches column: `yes` = repo matches the verified value; `no` = mismatch that needs a code fix; `unknown` = not verified, so no judgement is possible.
+
+## Summary of mismatches (need code fixes later)
+
+1. **Cashfree webhook timestamp unit (code is internally inconsistent).** `lib/payments/cashfree.ts` line 92 compares `Number(ts) * 1000` (seconds). `lib/payments/webhooks.ts` `verifyCashfreeSignature` compares the raw value to `nowMs` (milliseconds). The official example timestamp `1617695238078` is 13 digits (milliseconds). Real Cashfree webhooks would fail the freshness check in `cashfree.ts`. Fix: use milliseconds in one place, and make the two functions agree.
+2. **Cashfree `x-api-version`.** Repo sends `2023-08-01` (`lib/payments/cashfree.ts` line 53). The current spec example is `2026-01-01`. `2023-08-01` may still be accepted, but it is not the current version. Confirm before changing.
+3. **Cartesia model.** Repo sends `model_id: 'sonic-2'` (`lib/voice/providers/cartesia.ts` line 25). The current `tts/bytes` enum is `sonic-3.6`, `sonic-3.5`, `sonic-3`, `sonic-latest`. `sonic-2` is not listed. Mismatch.
+4. **Cartesia auth header.** Repo sends `X-API-Key` (line 19). The current `tts/bytes` OpenAPI spec defines an HTTP bearer scheme (`Authorization: Bearer <key>`). The `X-API-Key` header appears in older endpoint examples. Mismatch for `tts/bytes`; confirm against the live API before changing.
+5. **Cartesia-Version.** Repo sends `2024-06-10`. The current `tts/bytes` example is `2026-08-14`. Older pages use `2024-06-10` and `2024-11-13`. Repo value is an older dated version; confirm it is still accepted.
+6. **Deepgram mode.** Plan 04 describes a streaming endpoint. Repo calls the pre-recorded REST endpoint (`POST https://api.deepgram.com/v1/listen`) with a raw-audio body, and does not send `encoding`/`sample_rate` query parameters. The streaming endpoint is `wss://api.deepgram.com/v1/listen`. Mismatch with the plan's intent; the `Content-Type: audio/l16;...` header is NOT VERIFIED.
+7. **POS webhook signatures (Petpooja, Restroworks, UrbanPiper).** Repo values are all `ASSUMED`. None could be verified from an official source (see table). Treat these as unknown, not as confirmed mismatches. Note: third-party material on Petpooja describes a shared-secret check on order webhooks, not an HMAC, which conflicts with the repo assumption. Unverified.
+
+## Verified values
+
+| Provider | Item | Verified value | Official URL | Checked | Repo value (file) | Matches |
+|---|---|---|---|---|---|---|
+| MSG91 | OTP send endpoint and auth | NOT VERIFIED. Official v5 SendOTP reference could not be reached (`docs.msg91.com/reference/send-otp` returned 404; `docs.msg91.com/otp` lists SendOTP with no path or parameters). Legacy documented endpoint: `GET http://api.msg91.com/api/sendotp.php`, `authkey` as query parameter, `mobile` as integer with country code. Third-party code (not official) uses `POST https://control.msg91.com/api/v5/otp` with `authkey` header. | https://api.msg91.com/apidoc/sendotp/send-otp.php ; https://docs.msg91.com/otp | 2026-11-03 | `POST https://control.msg91.com/api/v5/otp`, header `authkey`, body `template_id`, `mobile` (no `+`), `otp` (`lib/auth/otp-providers.ts`) | unknown |
+| MSG91 | OTP body field names | NOT VERIFIED (only the legacy query fields are official: `authkey`, `mobile`, `otp`, `otp_expiry`, `otp_length`, `message`, `sender`). `template_id` not confirmed on any official page fetched. | as above | 2026-11-03 | `template_id`, `mobile`, `otp` | unknown |
+| MSG91 | OTP verify endpoint | NOT VERIFIED. Official page lists Verify as GET with no path shown. Third-party code uses `GET /api/v5/otp/verify`. | https://docs.msg91.com/otp | 2026-11-03 | not called from repo (checked locally) | unknown |
+| MSG91 | Response success shape | Legacy docs: JSON `{"message": ..., "type": "success"}`. Third-party reports say MSG91 can return HTTP 200 with `type: "error"`, so the body must be checked, not only the status. | https://api.msg91.com/apidoc/sendotp/send-otp.php | 2026-11-03 | throws on non-2xx only (`lib/auth/otp-providers.ts` line 46) | no (repo does not read the body; flag for fix if the v5 response is confirmed to use 200 on error) |
+| Cashfree | Create order path | `POST /pg/orders`; sandbox base `https://sandbox.cashfree.com/pg`, production `https://api.cashfree.com/pg` | https://www.cashfree.com/docs/api-reference/payments/latest/orders/create | 2026-11-03 | `${baseUrl}/pg/orders`, baseUrl default `https://sandbox.cashfree.com` (`lib/payments/cashfree.ts` line 44, 48) | yes |
+| Cashfree | Create order headers | `x-client-id`, `x-client-secret` (required) | same | 2026-11-03 | same names (lines 51-52) | yes |
+| Cashfree | `x-api-version` | Spec example and current value: `2026-01-01` (format YYYY-MM-DD) | same | 2026-11-03 | `2023-08-01` (line 53) | no (older version; confirm still accepted, then update to a current value) |
+| Cashfree | Create order body | `order_amount` (number, min 1), `order_currency`, `customer_details.customer_id`, `customer_details.customer_phone` (10 characters) | same | 2026-11-03 | `order_amount`, `order_currency`, `customer_details`. Phone is a placeholder `9999999999` (plan notes it must be replaced) | yes for names; placeholder phone must be replaced in Plan 05 |
+| Cashfree | Webhook signature header | `x-webhook-signature` | https://www.cashfree.com/docs/payments/online/webhooks/signature-verification | 2026-11-03 | `x-webhook-signature` (`lib/payments/cashfree.ts` line 98) | yes |
+| Cashfree | Webhook timestamp header | `x-webhook-timestamp` | same | 2026-11-03 | `x-webhook-timestamp` (line 90) | yes |
+| Cashfree | Signature algorithm and encoding | HMAC-SHA256, base64 output | same | 2026-11-03 | `createHmac('sha256').digest('base64')` (`lib/payments/webhooks.ts` line 39) | yes |
+| Cashfree | Signed string | Timestamp concatenated directly with raw body (no separator). Note: the doc's pseudocode shows `$timestamp.$payload` with a dot, but the manual code examples concatenate with no separator. The examples are treated as authoritative; confirm with the Dev Studio Webhook Verification tool before going live. | same | 2026-11-03 | `timestamp + rawBody` (line 39) | yes (with the ambiguity noted) |
+| Cashfree | Timestamp unit | NOT STATED in text. The example value `1617695238078` is 13 digits, which is milliseconds. Treat as milliseconds (inferred from the example, not stated). | same | 2026-11-03 | `cashfree.ts` line 92 uses seconds (`* 1000`); `webhooks.ts` uses milliseconds. Plan 06 assumes seconds. | no (see mismatch 1) |
+| Cashfree | Webhook secret | Doc says to use the PG secret key (client secret) for PG webhooks; the partner API key is used for partner webhooks | same | 2026-11-03 | `CASHFREE_WEBHOOK_SECRET` env var | unknown (confirm whether the webhook secret is the client secret or a separate value in the dashboard) |
+| Cashfree | Success event type | `PAYMENT_SUCCESS_WEBHOOK` | https://www.cashfree.com/docs/api-reference/payments/latest/payments/webhooks (search snippet and payload sample; not directly quoted) | 2026-11-03 | `PAYMENT_SUCCESS_WEBHOOK` maps to `payment.captured` (plan 06) | yes (from search snippet; treat as verified-by-sample) |
+| Cashfree | Failed event type | NOT VERIFIED. `PAYMENT_FAILED_WEBHOOK` not confirmed in any fetched official text. | same | 2026-11-03 | `PAYMENT_FAILED_WEBHOOK` | unknown |
+| Cashfree | Event id / payment id | `data.payment.cf_payment_id`; the type varies (string or number) in samples, so parse defensively. Each attempt has a unique id. | https://www.cashfree.com/docs/payments/online/webhooks/... (samples) | 2026-11-03 | `data.payment.cf_payment_id` (plan 06) | yes (parse as string; handle numeric) |
+| Razorpay | Create order path and base | `POST https://api.razorpay.com/v1/orders` | https://razorpay.com/docs/api/orders/create.md | 2026-11-03 | `${baseUrl}/v1/orders`, baseUrl `https://api.razorpay.com` (`lib/payments/razorpay.ts` lines 43, 47) | yes |
+| Razorpay | Create order auth | HTTP Basic `key_id:key_secret` | same | 2026-11-03 | `authorization: Basic base64(keyId:keySecret)` (line 50) | yes |
+| Razorpay | Create order body | `amount` (integer, smallest sub-unit = paise), `currency` (required), `receipt` (optional, max 40 chars, unique); response `id` | same | 2026-11-03 | `amount: Math.round(amountInr*100)` (paise), `currency`, `receipt` | yes |
+| Razorpay | Webhook signature header | `X-Razorpay-Signature` | https://razorpay.com/docs/webhooks/validate-test/ | 2026-11-03 | `x-razorpay-signature` (`lib/payments/razorpay.ts` line 79; header names are case-insensitive) | yes |
+| Razorpay | Signature algorithm and encoding | HMAC-SHA256 over the raw request body, keyed by the webhook secret; encoding is hex (labelled "HMAC Hex Digest" in the validation pseudocode; the prose does not repeat it) | same | 2026-11-03 | `createHmac('sha256', secret).update(rawBody).digest('hex')` (`lib/payments/webhooks.ts` line 19) | yes |
+| Razorpay | Webhook secret | The webhook secret set in the webhook configuration, not the API key secret | https://razorpay.com/docs/webhooks/validate-test/ | 2026-11-03 | `RAZORPAY_WEBHOOK_SECRET` | yes |
+| Razorpay | Event id header | `x-razorpay-event-id` (unique per event) | same | 2026-11-03 | `x-razorpay-event-id` (`lib/payments/razorpay.ts` line 84) | yes |
+| Razorpay | Timestamp header | None documented on the validation page | same | 2026-11-03 | not used | yes |
+| Razorpay | Event names `payment.captured`, `payment.failed` | NOT VERIFIED in the fetched text. Not checked against the event list page. | https://razorpay.com/docs/webhooks/ | 2026-11-03 | `payment.captured`, `payment.failed` | unknown |
+| Deepgram | Nova-3 model | `model=nova-3` is in the enum and is the latest model | https://developers.deepgram.com/docs/getting-started-with-live-streaming-audio ; https://developers.deepgram.com/reference/speech-to-text/listen-streaming | 2026-11-03 | `model=nova-3` (`lib/voice/providers/deepgram.ts` line 5) | yes |
+| Deepgram | Endpoint (streaming) | `wss://api.deepgram.com/v1/listen` | https://developers.deepgram.com/reference/speech-to-text/listen-streaming | 2026-11-03 | repo uses `POST https://api.deepgram.com/v1/listen?model=nova-3&language=multi&smart_format=true` (the pre-recorded REST path, not streaming) | no (mode mismatch with plan: plan says streaming; see mismatch 6) |
+| Deepgram | Auth header | `Authorization: Token <API_KEY>` (documented scheme for API keys; Bearer not mentioned for API keys) | https://developers.deepgram.com/docs/authenticating | 2026-11-03 | `Authorization: Token ${apiKey}` (line 15) | yes |
+| Deepgram | Raw audio content type and params | NOT VERIFIED for `Content-Type: audio/l16;rate=16000;channels=1`. Official reference describes `encoding` (enum includes `linear16`) and `sample_rate` as query parameters, and does not document the content-type. | https://developers.deepgram.com/reference/speech-to-text/listen-streaming | 2026-11-03 | `Content-Type: audio/l16;rate=16000;channels=1` (line 16) and no `encoding`/`sample_rate` query | unknown (likely needs `encoding=linear16&sample_rate=16000` query params; confirm) |
+| Cartesia | TTS endpoint | `POST https://api.cartesia.ai/tts/bytes` | https://docs.cartesia.ai/api-reference/tts/bytes | 2026-11-03 | `https://api.cartesia.ai/tts/bytes` (`lib/voice/providers/cartesia.ts` line 5) | yes |
+| Cartesia | Auth header | Current `tts/bytes` spec: HTTP bearer, `Authorization: Bearer <key>` (`sk_car_...`). Older endpoint examples use `X-API-Key`. | https://docs.cartesia.ai/api-reference/tts/bytes ; https://docs.cartesia.ai/2024-11-13/api-reference/tts/sse (older) | 2026-11-03 | `X-API-Key` (line 19) | no for `tts/bytes` (confirm against the live API before changing) |
+| Cartesia | Version header | `Cartesia-Version`; current `tts/bytes` example `2026-08-14`. Older examples use `2024-06-10` and `2024-11-13`. | same | 2026-11-03 | `Cartesia-Version: 2024-06-10` (line 6) | no (older dated value; confirm acceptance and update) |
+| Cartesia | model_id | Current enum: `sonic-3.6`, `sonic-3.5`, `sonic-3`, `sonic-latest`. `sonic-2` is not listed. | same | 2026-11-03 | `model_id: 'sonic-2'` (line 25) | no (mismatch, see mismatch 3) |
+| Cartesia | Body fields | `model_id`, `transcript`, `voice`, `output_format` are required | same | 2026-11-03 | same names (lines 25-29); extra `language: 'en'` not checked | yes |
+| Sarvam | Translation endpoint | `POST https://api.sarvam.ai/translate` (JSON text translation). Separate `/speech-to-text-translate` endpoint is multipart audio, not used by the repo. | https://docs.sarvam.ai/api-reference-docs/text/translate.md | 2026-11-03 | `https://api.sarvam.ai/translate` (`lib/voice/providers/sarvam.ts` line 5) | yes |
+| Sarvam | Auth header | `api-subscription-key` (required). `Authorization: Bearer` also accepted. | same | 2026-11-03 | `api-subscription-key` (line 22) | yes |
+| Sarvam | Body fields | `input` (max 1000 chars for mayura:v1), `source_language_code` (required; `auto` allowed for mayura:v1 only), `target_language_code` (required, no `auto`), `model` (`mayura:v1` or `sarvam-translate:v1`), `mode` (default `formal`) | same | 2026-11-03 | `input`, `source_language_code`, `target_language_code`, `model: 'mayura:v1'` (lines 25-29) | yes |
+| Sarvam | Language codes | `en-IN` and `hi-IN` are valid. Repo maps only `en` to `en-IN` and everything else to `hi-IN`. Only two languages are covered. | same | 2026-11-03 | `sarvamCode()` (lines 9-11) | yes for the codes used; the mapping is coarse (flag for Plan 04 if more languages are needed) |
+| Sarvam | Default model | NOT VERIFIED. The text endpoint page lists no default for `model`. | same | 2026-11-03 | `mayura:v1` set explicitly | yes (explicit value is valid) |
+| POS Petpooja | Webhook signature | NOT VERIFIED. No official partner documentation was reachable. Third-party profile describes a callbacks API and a shared-secret check on order webhooks, not HMAC. | https://github.com/api-evangelist/petpooja (third-party, not official) ; no official URL found | 2026-11-03 | `x-petpooja-signature`, hex HMAC-SHA256 (`lib/pos/petpooja.ts` line 48-51, ASSUMED) | unknown |
+| POS Restroworks | Webhook signature | NOT VERIFIED. No official docs found. Search returned only other vendors' docs. | none found | 2026-11-03 | `x-restroworks-signature`, base64 HMAC-SHA256 (`lib/pos/restroworks.ts` line 49-52, ASSUMED) | unknown |
+| POS UrbanPiper | Webhook signature | NOT VERIFIED. The developer hub page (https://developers.urbanpiper.com/) loaded with only a title; no webhook or signing content. | https://developers.urbanpiper.com/ | 2026-11-03 | `x-urbanpiper-signature`, hex HMAC-SHA256 (`lib/pos/urbanpiper.ts` line 43-46, ASSUMED) | unknown |
+| POS (all three) | Timestamp unit | NOT VERIFIED. No official doc reached. | none | 2026-11-03 | no timestamp check in POS adapters | unknown |
+
+## Not verified and why
+
+- **MSG91 v5 Send OTP (endpoint, header, body fields, verify).** The official v5 reference (`docs.msg91.com/reference/send-otp`) returned 404. The `docs.msg91.com/otp` overview lists SendOTP/Verify/Resend but shows no paths or parameters. The legacy `api.msg91.com/apidoc/sendotp/send-otp.php` page is official but documents only `sendotp.php` (GET, `authkey` query). Third-party code uses the v5 path, but that is not official. Next step: open the SendOTP page in the MSG91 dashboard docs, or ask MSG91 support, and record the exact path, header and body.
+- **Cashfree failed-payment event name.** `PAYMENT_FAILED_WEBHOOK` did not appear in any fetched official text.
+- **Razorpay `payment.captured` / `payment.failed` event names.** Not checked against the event list page.
+- **Deepgram raw-audio Content-Type.** The official reference does not document the Content-Type; it documents `encoding` and `sample_rate` query parameters.
+- **Petpooja, Restroworks, UrbanPiper webhook signatures and timestamp units.** Official partner documentation is not public in the sources reachable here; the UrbanPiper developer hub page had no webhook content. These are likely gated behind partner onboarding. Next step: request the webhook spec from each vendor's integration team, then update `lib/pos/*.ts` and the fixtures.
+
+## Other findings for the code owner
+
+- `lib/payments/cashfree.ts` line 92 (seconds) and `lib/payments/webhooks.ts` (milliseconds) disagree. Pick milliseconds (per the official example) and fix both, plus the Plan 06 open item.
+- Cashfree phone placeholder `9999999999` must be replaced with the verified diner phone (plan 05), as the plan already says.
+- Plan 04 says Deepgram streaming; repo implements pre-recorded REST. Decide which mode is intended before the first live call.
+
+## Sources
+
+- Razorpay validate and test webhooks: https://razorpay.com/docs/webhooks/validate-test/
+- Razorpay create order: https://razorpay.com/docs/api/orders/create.md
+- Cashfree webhook signature verification: https://www.cashfree.com/docs/payments/online/webhooks/signature-verification
+- Cashfree webhook overview: https://www.cashfree.com/docs/payments/online/webhooks/overview
+- Cashfree create order: https://www.cashfree.com/docs/api-reference/payments/latest/orders/create
+- Cashfree payment webhooks (search snippet): https://www.cashfree.com/docs/api-reference/payments/latest/payments/webhooks
+- MSG91 legacy SendOTP: https://api.msg91.com/apidoc/sendotp/send-otp.php
+- MSG91 OTP overview: https://docs.msg91.com/otp
+- Deepgram live streaming: https://developers.deepgram.com/docs/getting-started-with-live-streaming-audio
+- Deepgram listen streaming reference: https://developers.deepgram.com/reference/speech-to-text/listen-streaming
+- Deepgram authentication: https://developers.deepgram.com/docs/authenticating
+- Cartesia tts/bytes: https://docs.cartesia.ai/api-reference/tts/bytes
+- Sarvam text translate: https://docs.sarvam.ai/api-reference-docs/text/translate.md
+- UrbanPiper developer hub: https://developers.urbanpiper.com/
