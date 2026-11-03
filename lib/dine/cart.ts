@@ -5,6 +5,7 @@ import type { StationCategory, TicketStatus } from '@/types/food-os';
 import { gstOn, round2 } from '@/lib/pricing';
 import { allowsCartChanges } from './session-state';
 import type { TicketItem, TicketView } from '@/lib/kds/ticket-view';
+import { publishKdsEvent } from '@/lib/kds/events';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -62,7 +63,7 @@ export async function applyCartUpdate(
   const cart = CartUpdateSchema.parse(input.body);
   if (cart.order_type !== 'DINE_IN') throw new Error('DINE_IN_ONLY');
 
-  return asSession(pool, { sessionToken: input.sessionToken }, async (c) => {
+  const result = await asSession(pool, { sessionToken: input.sessionToken }, async (c) => {
     const s = await c.query<{ id: string; status: 'active' | 'payment_pending' | 'closed' | 'abandoned'; restaurant_id: string }>(
       `SELECT s.id, s.status, dt.restaurant_id
          FROM tabletop_sessions s JOIN dining_tables dt ON dt.id = s.table_id
@@ -173,4 +174,10 @@ export async function applyCartUpdate(
 
     return { tickets, subtotal, total };
   });
+
+  // Publish only after the commit. A Redis failure must not undo a committed cart change.
+  await Promise.all(result.tickets.map((ticket) =>
+    publishKdsEvent({ type: 'ticket.fired', restaurantId: ticket.restaurantId, sessionId: ticket.sessionId, ticket })
+      .catch((err: unknown) => console.error('kds publish failed', err))));
+  return result;
 }
