@@ -11,9 +11,10 @@ export default defineConfig({
       { find: '@', replacement: path.resolve(__dirname) },
     ],
   },
+  oxc: { jsx: { runtime: 'automatic' } },
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
+    include: ['tests/**/*.test.{ts,tsx}'],
     globals: true,
     setupFiles: ['tests/setup.ts'],
   },
