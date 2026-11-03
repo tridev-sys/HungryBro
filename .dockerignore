@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+dist
+dist-scripts
+docs
+original
+*.pdf
+.env*

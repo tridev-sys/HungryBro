@@ -1,0 +1,112 @@
+# Application stack. Publishes NO host ports. Traffic reaches `app` only through
+# the shared Caddy proxy (proxy_server/), via the external network `shared`.
+# Resource limits are hard caps; they sum to 4.0 CPUs and about 1.9 GB of memory.
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: food-os-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: food
+      POSTGRES_DB: food_os
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    # Local development only: bound to loopback so host tests can connect.
+    # docker-compose.prod.yml removes this and publishes nothing.
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - backend
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    cpus: 2.0
+    mem_limit: 2g
+    mem_reservation: 1g
+    pids_limit: 256
+    shm_size: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U food -d food_os"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    container_name: food-os-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    networks:
+      - backend
+    volumes:
+      - redisdata:/data
+    cpus: 0.5
+    mem_limit: 320m
+    mem_reservation: 128m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  app:
+    build: .
+    container_name: food-os-app
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - shared
+      - backend
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://food:${POSTGRES_PASSWORD}@db:5432/food_os
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    cpus: 1.5
+    mem_limit: 1g
+    mem_reservation: 512m
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  shared:
+    external: true
+  backend:
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: food-os-pgdata
+    labels:
+      app: food-os
+      purpose: postgres-data
+  redisdata:
+    name: food-os-redisdata
+    labels:
+      app: food-os
+      purpose: redis-aof
