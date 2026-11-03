@@ -1,0 +1,43 @@
+# Production override. Run as:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d
+# Requires Compose v2.24.4 or later (for !reset and !override).
+# Publishes NO host ports from this stack. The shared proxy (proxy_server/) is the only publisher.
+
+services:
+  app:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER (lowercase GitHub owner)}/food-os:${IMAGE_TAG:?set IMAGE_TAG to sha-<40-hex commit>}
+    build: !reset null
+    ports: !reset []
+    expose:
+      - "3000"
+    networks: !override
+      - shared
+      - backend
+    cpus: 1.5
+    mem_limit: 1g
+    mem_reservation: 512m
+    pids_limit: 512
+    restart: unless-stopped
+
+  db:
+    ports: !reset []
+    volumes: !override
+      - ${PGDATA_DIR:-/home/ubuntu/docker/data/postgres}:/var/lib/postgresql/data
+    networks: !override
+      - backend
+    cpus: 2.0
+    mem_limit: 2g
+    mem_reservation: 1g
+    shm_size: 256m
+    pids_limit: 256
+    restart: unless-stopped
+
+  redis:
+    ports: !reset []
+    networks: !override
+      - backend
+    cpus: 0.5
+    mem_limit: 320m
+    mem_reservation: 128m
+    pids_limit: 128
+    restart: unless-stopped
