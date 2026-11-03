@@ -1,0 +1,16 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-pg-14d",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "pg/" },
+      "Expiration": { "Days": 14 }
+    },
+    {
+      "ID": "expire-caddy-14d",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "caddy/" },
+      "Expiration": { "Days": 14 }
+    }
+  ]
+}

@@ -1,9 +1,10 @@
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool } from '@/lib/db/client';
 import { verifyCashfreeSignature, recordWebhookEvent } from '@/lib/payments/webhooks';
 
 // VERIFY AGAINST CURRENT DOCS BEFORE IMPLEMENTING: header names x-webhook-timestamp and x-webhook-signature.
 // Open item: the event id is the signature header value here; Plan 06 uses data.payment.cf_payment_id.
-export async function POST(req: Request): Promise<Response> {
+async function handlePost(req: Request): Promise<Response> {
   const rawBody = await req.text();
   const signature = req.headers.get('x-webhook-signature');
   const verified = verifyCashfreeSignature({
@@ -20,3 +21,5 @@ export async function POST(req: Request): Promise<Response> {
   if (recorded === 'DUPLICATE') return Response.json({ error: 'DUPLICATE_EVENT' }, { status: 409 });
   return Response.json({ ok: true }, { status: 200 });
 }
+
+export const POST = withApiGuards(handlePost, { sessionToken: publicSessionToken });

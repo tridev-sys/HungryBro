@@ -1,3 +1,4 @@
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { z } from 'zod';
 import { getPool } from '@/lib/db/client';
 import { asIntegration } from '@/lib/db/integration';
@@ -14,7 +15,7 @@ function json(status: number, body: unknown): Response {
 
 // Order of operations is fixed: resolve the restaurant, verify the signature, then parse,
 // then write. All of it runs in one transaction, so a failure rolls back.
-export async function POST(
+async function handlePost(
   req: Request,
   ctx: { params: Promise<{ provider: string; restaurantId: string }> },
 ): Promise<Response> {
@@ -57,3 +58,5 @@ export async function POST(
     throw e;
   }
 }
+
+export const POST = withApiGuards(handlePost, { sessionToken: publicSessionToken });

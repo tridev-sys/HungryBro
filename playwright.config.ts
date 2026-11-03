@@ -1,22 +1,30 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 3100;
-// When BASE_URL is set, tests run against that already-running server (for example a production build in a container). No dev server is started.
-const baseURL = process.env.BASE_URL ?? `http://localhost:${PORT}`;
+// Base URL precedence: E2E_BASE_URL (CI and the shared network: http://food-os-app:3000), then
+// BASE_URL (a production build run in a container). When either is set, no dev server is started.
+// Without them, a local dev server is started on port 3100 (used by the dev-preview layout specs).
+const LOCAL_PORT = 3100;
+const externalBase = process.env.E2E_BASE_URL ?? process.env.BASE_URL;
+const baseURL = externalBase ?? `http://localhost:${LOCAL_PORT}`;
 
 export default defineConfig({
-  testDir: 'tests/e2e',
+  testDir: '.',
+  testMatch: ['e2e/**/*.spec.ts', 'tests/e2e/**/*.spec.ts'],
   outputDir: 'test-results',
+  // No retries: flaky timing belongs in the test, not hidden by retries.
+  retries: 0,
+  reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL,
+    trace: 'retain-on-failure',
   },
-  webServer: process.env.BASE_URL
+  webServer: externalBase
     ? undefined
     : {
-        command: `npx next dev -p ${PORT}`,
+        command: `npx next dev -p ${LOCAL_PORT}`,
         url: baseURL,
         reuseExistingServer: true,
         timeout: 120_000,
       },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [{ name: 'chromium', use: { ...devices['Pixel 7'] } }],
 });
