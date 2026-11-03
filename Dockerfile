@@ -26,4 +26,5 @@ COPY --from=build /app/dist-scripts ./dist-scripts
 COPY --from=build /app/db/migrations ./db/migrations
 COPY --from=prod-deps /app/node_modules ./node_modules
 EXPOSE 3000
-CMD ["sh", "-c", "node dist-scripts/scripts/migrate-cli.js && node server.js"]
+# Migrations run in the one-shot `migrate` service (docker-compose*.yml), never in this container.
+CMD ["node", "server.js"]

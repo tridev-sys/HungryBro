@@ -19,6 +19,17 @@ services:
     pids_limit: 512
     restart: unless-stopped
 
+  migrate:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER (lowercase GitHub owner)}/food-os:${IMAGE_TAG:?set IMAGE_TAG to sha-<40-hex commit>}
+    build: !reset null
+    ports: !reset []
+    networks: !override
+      - backend
+    cpus: 0.5
+    mem_limit: 512m
+    mem_reservation: 256m
+    pids_limit: 128
+
   db:
     ports: !reset []
     volumes: !override

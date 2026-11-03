@@ -5,12 +5,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export IMAGE_TAG=sha-0000000000000000000000000000000000000000 GHCR_OWNER=example DOMAIN=test.example.com \
-  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me APP_DB_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test
+  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me APP_DB_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test \
+  ADMIN_DATABASE_URL=postgres://food:change-me@db:5432/food_os
 cfg=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json)
 pcfg=$(docker compose -f proxy_server/docker-compose.yml config --format json)
 (echo "$cfg"; echo "$pcfg") | jq -e -s '
   [ .[].services | to_entries[] | .value.logging ] as $l
-  | ($l | length) == 4
+  | ([.[].services | keys[]] | length) == ($l | length)
     and all($l[]; .driver == "json-file" and .options["max-size"] == "10m" and .options["max-file"] == "3")' >/dev/null \
   || { echo "FAIL: a service is missing the bounded json-file log" >&2; exit 1; }
 (echo "$cfg"; echo "$pcfg") | jq -e -s '[.[].services[] | .logging.driver] | any(. == "awslogs") | not' >/dev/null \

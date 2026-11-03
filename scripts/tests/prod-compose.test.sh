@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export IMAGE_TAG=sha-0000000000000000000000000000000000000000 GHCR_OWNER=example DOMAIN=test.example.com \
-  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me APP_DB_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test
+  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me APP_DB_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test \
+  ADMIN_DATABASE_URL=postgres://food:change-me@db:5432/food_os
 cfg=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json)
 pcfg=$(docker compose -f proxy_server/docker-compose.yml config --format json)
 j() { echo "$cfg" | jq -e "$1" >/dev/null || { echo "FAIL: $1" >&2; exit 1; }; }
@@ -36,5 +37,13 @@ j '.networks.shared.external == true'
 j '(.services.db.networks | keys) == ["backend"]'
 j '(.services.redis.networks | keys) == ["backend"]'
 p '(.services.caddy.networks | keys) == ["shared"]'
+
+# Migrations run in the one-shot migrate service only. The app container never holds the owner login.
+j '(.services.app | tostring | contains("ADMIN_DATABASE_URL")) | not'
+j '(.services.app.environment // {} | has("ADMIN_DATABASE_URL")) | not'
+j '(.services.migrate.environment | has("ADMIN_DATABASE_URL"))'
+j '.services.app.depends_on.migrate.condition == "service_completed_successfully"'
+j '(.services.migrate.ports // []) | length == 0'
+j '(.services.migrate.networks | keys) == ["backend"]'
 
 echo "prod compose OK"

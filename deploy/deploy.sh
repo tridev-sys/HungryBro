@@ -44,7 +44,7 @@ healthy() {
 
 deploy_tag() {
   set_tag "$1"
-  "${COMPOSE[@]}" pull app && "${COMPOSE[@]}" up -d --no-deps app && healthy
+  "${COMPOSE[@]}" pull app migrate && "${COMPOSE[@]}" run --rm migrate && "${COMPOSE[@]}" up -d --no-deps app && healthy
 }
 
 registry_login
