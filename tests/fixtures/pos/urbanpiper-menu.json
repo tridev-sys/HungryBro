@@ -1,0 +1,8 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real UrbanPiper capture after partner signs" },
+  "location_id": "UP-LOC-77",
+  "items": [
+    { "retailer_id": "up-idli-20", "title": "Idli Sambar (2)", "description": "Steamed rice cakes", "price": 90, "veg": true, "prep_time": 8, "category": "South Indian", "available": true, "station": "Pantry", "spice_level": 1 },
+    { "retailer_id": "up-mutton-21", "title": "Mutton Pepper Fry", "description": "", "price": 420, "veg": false, "prep_time": 22, "category": "Non-Veg", "available": true, "station": "Curry", "spice_level": 3 }
+  ]
+}

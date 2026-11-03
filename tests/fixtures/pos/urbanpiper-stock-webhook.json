@@ -1,0 +1,7 @@
+{
+  "_fixture": { "synthetic": true, "shaped_from": "public documentation, paraphrased", "replace_with": "real UrbanPiper capture after partner signs" },
+  "event_type": "item.availability",
+  "location_id": "UP-LOC-77",
+  "retailer_id": "up-idli-20",
+  "available": false
+}
