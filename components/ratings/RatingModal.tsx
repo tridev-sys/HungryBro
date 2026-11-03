@@ -66,7 +66,7 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
               aria-label={`${n} star${n === 1 ? '' : 's'}`}
               aria-checked={score === n}
               onClick={() => setScore(n)}
-              className="rounded p-1"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1"
             >
               <Star className={n <= (score ?? 0) ? 'fill-amber-400 text-amber-400' : 'text-neutral-300'} size={32} />
             </button>
@@ -80,7 +80,7 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
               type="button"
               aria-pressed={tags.includes(tag)}
               onClick={() => setTags((prev) => toggleTag(prev, tag))}
-              className={`rounded-full border px-3 py-1 text-sm ${tags.includes(tag) ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-300'}`}
+              className={`inline-flex min-h-11 items-center rounded-full border px-3 py-1 text-sm ${tags.includes(tag) ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-300'}`}
             >
               {tag}
             </button>
@@ -90,12 +90,12 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
         {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
 
         <div className="mt-6 flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm">Not now</button>
+          <button type="button" onClick={onClose} className="min-h-11 px-4 py-2 text-sm">Not now</button>
           <button
             type="button"
             onClick={submit}
             disabled={submitting || !canSubmitRating(score, tags)}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-40"
+            className="min-h-11 rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-40"
           >
             {submitting ? 'Submitting...' : 'Submit rating'}
           </button>

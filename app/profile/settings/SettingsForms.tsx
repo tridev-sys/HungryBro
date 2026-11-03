@@ -42,12 +42,12 @@ export function SettingsForms({ profile }: { profile: SettingsProfile }) {
                 {vpa !== profile.defaultVpa && (
                   <form action={setDefaultAction}>
                     <input type="hidden" name="vpa" value={vpa} />
-                    <button type="submit" className="text-sm underline">Make default</button>
+                    <button type="submit" className="inline-flex min-h-11 min-w-11 items-center justify-center text-sm underline">Make default</button>
                   </form>
                 )}
                 <form action={removeAction}>
                   <input type="hidden" name="vpa" value={vpa} />
-                  <button type="submit" className="text-sm text-red-700 underline">Remove</button>
+                  <button type="submit" className="inline-flex min-h-11 min-w-11 items-center justify-center text-sm text-red-700 underline">Remove</button>
                 </form>
               </span>
             </li>
@@ -60,9 +60,9 @@ export function SettingsForms({ profile }: { profile: SettingsProfile }) {
             placeholder="name@bank"
             autoComplete="off"
             required
-            className="flex-1 rounded border border-neutral-300 px-3 py-2"
+            className="min-h-11 flex-1 rounded border border-neutral-300 px-3 py-2"
           />
-          <button type="submit" disabled={addPending} className="rounded bg-neutral-900 px-4 py-2 text-white">
+          <button type="submit" disabled={addPending} className="min-h-11 rounded bg-neutral-900 px-4 py-2 text-white">
             Add
           </button>
         </form>
@@ -77,9 +77,9 @@ export function SettingsForms({ profile }: { profile: SettingsProfile }) {
             defaultValue={profile.savedGstin ?? ''}
             placeholder="15-character GSTIN (optional)"
             autoComplete="off"
-            className="flex-1 rounded border border-neutral-300 px-3 py-2 font-mono uppercase"
+            className="min-h-11 flex-1 rounded border border-neutral-300 px-3 py-2 font-mono uppercase"
           />
-          <button type="submit" disabled={gstinPending} className="rounded bg-neutral-900 px-4 py-2 text-white">
+          <button type="submit" disabled={gstinPending} className="min-h-11 rounded bg-neutral-900 px-4 py-2 text-white">
             Save
           </button>
         </form>
