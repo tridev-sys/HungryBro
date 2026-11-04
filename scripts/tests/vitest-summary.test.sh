@@ -5,6 +5,7 @@
 set -eu
 cd "$(dirname "$0")/../.."
 SUMMARY=scripts/tests/vitest-summary.sh
+mkdir -p "$PWD/test-results" # git-ignored; absent in a fresh checkout
 TMP="$(mktemp -d "$PWD/test-results/summary-test.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
