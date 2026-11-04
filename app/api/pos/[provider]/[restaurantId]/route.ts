@@ -5,6 +5,7 @@ import { getPool } from '@/lib/db/client';
 import { asIntegration } from '@/lib/db/integration';
 import { decryptCredentials, loadPosKey } from '@/lib/pos/credentials';
 import { getPosAdapter } from '@/lib/pos/registry';
+import { parsePosProvidersEnabled } from '@/lib/pos/allowlist';
 import { setStock, upsertMenu } from '@/lib/pos/upsert';
 import { PosPayloadError } from '@/lib/pos/types';
 
@@ -24,6 +25,11 @@ async function handlePost(
   ctx: { params: Promise<{ provider: string; restaurantId: string }> },
 ): Promise<Response> {
   const { provider, restaurantId } = await ctx.params;
+  // Allow-list gate first: a provider that is not enabled gets 404 before the body is read,
+  // before any signature check, and before any database access.
+  if (!parsePosProvidersEnabled(process.env.POS_PROVIDERS_ENABLED).has(provider)) {
+    return json(404, { error: 'not_found' });
+  }
   const adapter = getPosAdapter(provider);
   if (!adapter || !z.string().uuid().safeParse(restaurantId).success) {
     return json(404, { error: 'not_found' });

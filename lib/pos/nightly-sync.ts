@@ -2,6 +2,7 @@ import type pg from 'pg';
 import { withSyncTx } from '../db/sync';
 import { decryptCredentials, loadPosKey } from './credentials';
 import { getPosAdapter } from './registry';
+import { parsePosProvidersEnabled } from './allowlist';
 import { upsertMenu } from './upsert';
 import type { PosProvider } from './types';
 
@@ -30,10 +31,17 @@ export function httpMenuFetcher(opts: { fetchImpl?: typeof fetch }): MenuFetcher
 
 // Each restaurant runs in its own transaction; one failure does not stop the others.
 // Errors carry no decrypted credentials.
+// Providers outside `enabled` (POS_PROVIDERS_ENABLED) are skipped and reported with a reason.
+// Their credentials are not decrypted and nothing is fetched or written for them.
 export async function runNightlyMenuSync(
   pool: pg.Pool,
   fetcher: MenuFetcher,
-): Promise<{ synced: number; failed: { restaurantId: string; error: string }[] }> {
+  enabled: ReadonlySet<string> = parsePosProvidersEnabled(process.env.POS_PROVIDERS_ENABLED),
+): Promise<{
+  synced: number;
+  failed: { restaurantId: string; error: string }[];
+  skipped: { restaurantId: string; provider: string; reason: 'provider_not_enabled' }[];
+}> {
   // LEFT JOIN with '{}' keeps a restaurant that has no credentials row in the failure report,
   // as before, instead of silently skipping it.
   const { rows } = await pool.query(
@@ -44,7 +52,12 @@ export async function runNightlyMenuSync(
   );
   let synced = 0;
   const failed: { restaurantId: string; error: string }[] = [];
+  const skipped: { restaurantId: string; provider: string; reason: 'provider_not_enabled' }[] = [];
   for (const row of rows) {
+    if (!enabled.has(row.pos_provider)) {
+      skipped.push({ restaurantId: row.id, provider: row.pos_provider, reason: 'provider_not_enabled' });
+      continue;
+    }
     try {
       const provider = row.pos_provider as PosProvider;
       const adapter = getPosAdapter(provider);
@@ -58,5 +71,5 @@ export async function runNightlyMenuSync(
       failed.push({ restaurantId: row.id, error: e instanceof Error ? e.message : String(e) });
     }
   }
-  return { synced, failed };
+  return { synced, failed, skipped };
 }
