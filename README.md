@@ -122,6 +122,8 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`:
 
 Production uses `docker-compose.yml` with `docker-compose.prod.yml`. In production, no service publishes a host port. Postgres data is stored under `data/postgres`. Named volumes are `food-os-pgdata` and `food-os-redisdata`, and Caddy's data volume is also backed up. Every service has CPU, memory and PID limits and bounded JSON logs.
 
+No IP address is committed to this repository. The EC2 instance has no Elastic IP, so its public and private addresses change on every stop/start. After each start, check the current public IP in the console or with IMDSv2, then update the DNS A record for `DOMAIN` and the GitHub secret `EC2_HOST`. The deploy reads `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY` and `DOMAIN` from GitHub secrets at run time. `tests/config/no-hardcoded-ip.test.ts` fails if an IPv4 address other than loopback or an RFC 5737 documentation address is committed.
+
 ## Plans and decisions
 
 - `docs/superpowers/plans/2026-11-03-00-roadmap.md`: the roadmap and build order (01 to 08).
