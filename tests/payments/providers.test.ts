@@ -52,12 +52,48 @@ test('cashfree creates an order in rupees and returns a UPI intent', async () =>
   expect(intent).toMatchObject({ provider: 'cashfree', providerOrderId: 'ord-1', amountInr: 698 });
 });
 
-test('cashfree verifies a fresh signed webhook over timestamp plus body', () => {
+test('cashfree verifies a fresh signed webhook over timestamp plus body (epoch milliseconds)', () => {
   const raw = fx('cashfree-payment-success.json');
-  const ts = String(Math.floor(Date.now() / 1000));
+  const ts = String(Date.now());
   const sig = createHmac('sha256', 'cfwh').update(ts + raw).digest('base64');
   const ev = new CashfreeProvider(cfCfg).verifyWebhook(raw, { 'x-webhook-signature': sig, 'x-webhook-timestamp': ts });
   expect(ev).toMatchObject({ provider: 'cashfree', providerEventId: '555001', eventType: 'payment.captured', providerOrderId: 'ord-1', amountInr: 698 });
+});
+
+test('cashfree rejects a validly signed webhook older than the 5 minute window (milliseconds)', () => {
+  const raw = fx('cashfree-payment-success.json');
+  const ts = String(Date.now() - 6 * 60 * 1000);
+  const sig = createHmac('sha256', 'cfwh').update(ts + raw).digest('base64');
+  expect(() => new CashfreeProvider(cfCfg).verifyWebhook(raw, { 'x-webhook-signature': sig, 'x-webhook-timestamp': ts }, Date.now()))
+    .toThrow(WebhookSignatureError);
+});
+
+test('cashfree treats a seconds-based timestamp as out of window (unit is milliseconds)', () => {
+  const raw = fx('cashfree-payment-success.json');
+  const ts = String(Math.floor(Date.now() / 1000));
+  const sig = createHmac('sha256', 'cfwh').update(ts + raw).digest('base64');
+  expect(() => new CashfreeProvider(cfCfg).verifyWebhook(raw, { 'x-webhook-signature': sig, 'x-webhook-timestamp': ts }, Date.now()))
+    .toThrow(WebhookSignatureError);
+});
+
+test('cashfree rejects a bad signature on a fresh millisecond timestamp before parsing (Review Focus 2)', () => {
+  const raw = fx('cashfree-payment-success.json');
+  const ts = String(Date.now());
+  const sig = createHmac('sha256', 'attacker').update(ts + raw).digest('base64');
+  const parse = vi.spyOn(JSON, 'parse');
+  expect(() => new CashfreeProvider(cfCfg).verifyWebhook(raw, { 'x-webhook-signature': sig, 'x-webhook-timestamp': ts }))
+    .toThrow(WebhookSignatureError);
+  expect(parse).not.toHaveBeenCalled();
+  parse.mockRestore();
+});
+
+test('cartesia TTS requests the sonic-3 model (sonic-2 is not in the current enum)', async () => {
+  const { createCartesiaTts } = await import('@/lib/voice/providers/cartesia');
+  const fetchImpl = vi.fn(async () => new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 }));
+  const tts = createCartesiaTts({ apiKey: 'ct-test-key', voiceId: 'voice-1', fetchImpl: fetchImpl as unknown as typeof fetch });
+  for await (const _chunk of tts.synthesize('two naan', 'en')) { /* drain */ }
+  const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+  expect(JSON.parse(String(init.body))).toMatchObject({ model_id: 'sonic-3' });
 });
 
 test('cashfree rejects a stale timestamp even with a valid signature (Review Focus 2)', () => {

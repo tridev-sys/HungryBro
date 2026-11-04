@@ -22,7 +22,7 @@ export function createCartesiaTts(opts: { apiKey: string; fetchImpl?: typeof fet
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model_id: 'sonic-2',
+          model_id: 'sonic-3',
           transcript: text,
           voice: { mode: 'id', id: voiceId },
           output_format: { container: 'raw', encoding: 'pcm_s16le', sample_rate: 16000 },
