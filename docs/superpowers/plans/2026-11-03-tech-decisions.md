@@ -181,3 +181,8 @@ Binding for the business logic build (branch `feat/business-logic`, migration `0
 - **Transit source.** No transit time is stored before dispatch. `TRANSIT_ESTIMATE_MINUTES = 12` reuses the existing estimate (the sandbox dispatch ETA in `lib/dispatch/sandbox.ts`). A distance-based transit model is a later change and needs a rule from the owner.
 - **Not wired yet.** The dispatch adapters do not return a cost, so no live code path writes `delivery_pass_through_costs` yet. This is a follow-up, not a gap in the calculation.
 
+**Amendment 2026-11-04 (owner decision, supersedes the Let's Encrypt wording in the shared reverse proxy bullet above)**
+- Domain `hungrybro.pacewisdom.in`, proxied by Cloudflare (orange cloud), SSL/TLS mode Full (strict).
+- Caddy terminates TLS with the Cloudflare Origin CA certificate: `tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem`, mounted read-only from the host folder `/etc/caddy/origin` (key mode 600). No ACME or Let's Encrypt for this site, because HTTP challenges fail behind the Cloudflare proxy. `ACME_EMAIL` is removed.
+- Host: Elastic IP in `ap-south-1`. The address lives only in GitHub variable `EC2_HOST` and the Cloudflare DNS record, never in the repo.
+- Client IP: Caddy sets `X-Real-IP` from `CF-Connecting-IP` (the one place the X-Real-IP contract changes).
