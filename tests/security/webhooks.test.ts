@@ -93,13 +93,10 @@ describe('Razorpay webhook', () => {
     try {
       const id = `evt-nosecret-${Date.now()}`;
       const body = rzpBody(id);
-      let status = 0;
-      try {
-        status = (await razorpayPOST(rzpReq(body, { 'x-razorpay-signature': rzpSig(body, ''), 'x-razorpay-event-id': id }))).status;
-      } catch {
-        status = 500; // the route throws when unconfigured; still not accepted
-      }
-      expect(status).not.toBe(200);
+      // The route has no response to return when unconfigured: verifyRazorpaySignature throws
+      // 'webhook secret is not configured' before any comparison, so the request rejects.
+      await expect(razorpayPOST(rzpReq(body, { 'x-razorpay-signature': rzpSig(body, ''), 'x-razorpay-event-id': id })))
+        .rejects.toThrow('webhook secret is not configured');
       expect(await eventCount('razorpay', id)).toBe(0);
     } finally {
       process.env.RAZORPAY_WEBHOOK_SECRET = saved;
@@ -197,7 +194,8 @@ describe('POS webhook (petpooja, restaurant Y)', () => {
     expect(await stockOf('pp-naan-01')).toBe(true);
     // Replaying the older, validly signed "out of stock" body must not revert the newer state.
     const replay = await post(stockOut, sign(stockOut, w.yPosSecret));
-    expect(replay.status).not.toBe(200);
+    expect(replay.status).toBe(409);
+    expect(await replay.json()).toEqual({ error: 'replayed' });
     expect(await stockOf('pp-naan-01')).toBe(true);
   });
 
