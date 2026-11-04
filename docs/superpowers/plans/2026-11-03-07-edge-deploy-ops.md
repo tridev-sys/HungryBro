@@ -249,13 +249,13 @@ test('IP key is prefixed', () => {
 });
 
 test('Caddy-set X-Real-IP wins over any forwarded chain', () => {
-  const h = new Headers({ 'x-real-ip': '203.0.113.9', 'x-forwarded-for': '6.6.6.6' });
+  const h = new Headers({ 'x-real-ip': '203.0.113.9', 'x-forwarded-for': '198.51.100.66' });
   expect(clientIpFromHeaders(h)).toBe('203.0.113.9');
 });
 
 test('client-sent X-Forwarded-For cannot pick its own IP (Review Focus 2)', () => {
   // Caddy appends the real peer to the end of the chain. The leftmost entry is attacker-controlled.
-  const h = new Headers({ 'x-forwarded-for': '6.6.6.6, 203.0.113.9' });
+  const h = new Headers({ 'x-forwarded-for': '198.51.100.66, 203.0.113.9' });
   expect(clientIpFromHeaders(h)).toBe('203.0.113.9');
   expect(clientIpFromHeaders(new Headers())).toBe('unknown');
 });

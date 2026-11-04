@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test';
 // BASE_URL is the app container address on e2e-net. Chromium is told to treat that origin as secure
 // because the app sets Secure cookies (fos_session, fos_table_session) and the test network is plain HTTP.
 const BASE_URL = process.env.BASE_URL;
-if (!BASE_URL) throw new Error('BASE_URL is required (the e2e app container, for example http://172.20.0.5:3000)');
+if (!BASE_URL) throw new Error('BASE_URL is required (the e2e app container, for example http://<app-container-ip>:3000)');
 
 export default defineConfig({
   testDir: '.',

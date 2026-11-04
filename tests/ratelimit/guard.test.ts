@@ -37,11 +37,11 @@ test('a client-sent X-Forwarded-For cannot reset its own bucket (Review Focus 2)
   const session = `sess-${randomUUID()}`;
   for (let i = 0; i < 60; i++) {
     const r = new Request('http://localhost/api/x', {
-      headers: { 'x-real-ip': ip, 'x-forwarded-for': `10.0.0.${i}` },
+      headers: { 'x-real-ip': ip, 'x-forwarded-for': `198.51.100.${i}` },
     });
     expect(await guardRateLimit(r, store, session, 0)).toBeNull();
   }
-  const r = new Request('http://localhost/api/x', { headers: { 'x-real-ip': ip, 'x-forwarded-for': '10.9.9.9' } });
+  const r = new Request('http://localhost/api/x', { headers: { 'x-real-ip': ip, 'x-forwarded-for': '198.51.100.99' } });
   expect((await guardRateLimit(r, store, session, 0))?.status).toBe(429);
 });
 
