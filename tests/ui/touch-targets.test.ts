@@ -43,7 +43,10 @@ test('the touch-target check fails for a 34 px button', () => {
 // width. Class names built from a const are resolved from that file.
 
 const SOURCE_ROOTS = ['app', 'components'].map((d) => path.resolve(__dirname, '../..', d));
-const CONTROL = /<(button|a|input|select|textarea)(?=[\s>/])/g;
+const NATIVE_CONTROLS = new Set(['button', 'a', 'input', 'select', 'textarea']);
+// Non-native elements made interactive by an ARIA role (for example <div role="button">) are controls too.
+const CONTROL_ROLE = /\brole="(button|link|radio|checkbox|switch|tab|menuitem)"/;
+const ELEMENT = /<([a-z][a-z0-9-]*)(?=[\s>/])/g;
 const FILLS = /(?:^|\s)(w-full|flex-1|grow)(?=\s|$)/;
 // px-3 is 12 px each side: a labelled control with that padding is at least 44 px wide.
 const PADDED = /(?:^|\s)px-(\d+)(?=\s|$)/;
@@ -72,6 +75,20 @@ function tagEnd(src: string, start: number): number {
   return -1;
 }
 
+// Every interactive element in the source: native controls plus any element given a control role.
+// Each entry carries the full opening tag text so the callers can read its props.
+function controlStarts(src: string): { start: number; tag: string }[] {
+  const found: { start: number; tag: string }[] = [];
+  for (const m of src.matchAll(ELEMENT)) {
+    const start = m.index!;
+    const end = tagEnd(src, start);
+    if (end < 0) continue;
+    const tag = src.slice(start, end + 1);
+    if (NATIVE_CONTROLS.has(m[1]) || CONTROL_ROLE.test(tag)) found.push({ start, tag });
+  }
+  return found;
+}
+
 // Resolves ${name} references to the string literals in the const that declares them.
 function expandConsts(classes: string, src: string): string {
   return classes.replace(/\$\{(\w+)\}/g, (_m, name: string) => {
@@ -97,9 +114,7 @@ interface SmallControl { line: number; tag: string; classes: string; problem: st
 function smallControlsIn(file: string): SmallControl[] {
   const src = readFileSync(file, 'utf8');
   const found: SmallControl[] = [];
-  for (const m of src.matchAll(CONTROL)) {
-    const start = m.index!;
-    const tag = src.slice(start, tagEnd(src, start) + 1);
+  for (const { start, tag } of controlStarts(src)) {
     if (/type="hidden"/.test(tag)) continue;
     const cls = /className=(?:"([^"]*)"|\{\s*`([^`]*)`\s*\}|\{([^}]*)\})/.exec(tag);
     const raw = cls ? (cls[1] ?? cls[2] ?? cls[3] ?? '') : '';
@@ -112,7 +127,7 @@ function smallControlsIn(file: string): SmallControl[] {
     const wideEnough = width >= MIN_TOUCH_PX || FILLS.test(classes) || (padded !== null && Number(padded[1]) >= 3);
     if (!wideEnough) problems.push(`width ${width || 'undeclared'}px`);
     if (problems.length) {
-      found.push({ line: src.slice(0, start).split('\n').length, tag: m[1], classes, problem: problems.join(', ') });
+      found.push({ line: src.slice(0, start).split('\n').length, tag: /^<([a-z][a-z0-9-]*)/.exec(tag)![1], classes, problem: problems.join(', ') });
     }
   }
   return found;
@@ -122,9 +137,37 @@ const allFiles = SOURCE_ROOTS.flatMap(tsxFiles);
 const relative = (f: string) => path.relative(path.resolve(__dirname, '../..'), f);
 
 test('the source scan finds the interactive controls it is meant to check', () => {
-  const controls = allFiles.reduce((n, f) => n + [...readFileSync(f, 'utf8').matchAll(CONTROL)].length, 0);
+  const controls = allFiles.reduce((n, f) => n + controlStarts(readFileSync(f, 'utf8')).length, 0);
   expect(allFiles.length).toBeGreaterThan(20);
   expect(controls).toBeGreaterThan(20);
+});
+
+// Audit inventory: every file in app/ and components/ that renders a control (hidden inputs
+// excluded), with the number of controls audited in that file. A new control, or a file that
+// gains one, fails this test until it is sized and added here.
+const AUDITED_CONTROLS: Record<string, number> = {
+  'app/auth/login/LoginForm.tsx': 4,
+  'app/delivery/_components/DeliveryConsole.tsx': 2,
+  'app/delivery/_components/VoiceInput.tsx': 3,
+  'app/profile/settings/SettingsForms.tsx': 6,
+  'components/billing/BillPanel.tsx': 2,
+  'components/dine/BillSplitSelector.tsx': 4,
+  'components/dine/DynamicUpiQrModal.tsx': 1,
+  'components/dine/MenuList.tsx': 1,
+  'components/kds/StationTicketCard.tsx': 2,
+  'components/ratings/RatingModal.tsx': 5,
+  'components/ui/ActionBar.tsx': 2,
+  'components/ui/AppShell.tsx': 2,
+  'components/ui/FilterChip.tsx': 1,
+};
+
+test('every control in app/ and components/ is in the audited inventory', () => {
+  const counted: Record<string, number> = {};
+  for (const file of allFiles) {
+    const n = controlStarts(readFileSync(file, 'utf8')).filter((c) => !/type="hidden"/.test(c.tag)).length;
+    if (n > 0) counted[relative(file)] = n;
+  }
+  expect(counted).toEqual(AUDITED_CONTROLS);
 });
 
 test('no interactive control in app/ or components/ is below 44 x 44 CSS px', () => {
@@ -142,11 +185,13 @@ test('the scan flags a 34 px control and a control with no declared size', () =>
   const file = path.join(dir, 'Fixture.tsx');
   writeFileSync(file, 'export const A = () => <button className="min-h-[34px] min-w-[34px]">x</button>;\n' +
     'export const B = () => <input className="px-2" />;\n' +
-    'export const C = () => <a className="min-h-11 min-w-11">ok</a>;\n');
+    'export const C = () => <a className="min-h-11 min-w-11">ok</a>;\n' +
+    'export const D = () => <div role="button" className="p-1">x</div>;\n');
   try {
     const found = smallControlsIn(file);
-    expect(found.map((f) => f.tag)).toEqual(['button', 'input']);
+    expect(found.map((f) => f.tag)).toEqual(['button', 'input', 'div']);
     expect(found[0].problem).toContain('height 34px');
+    expect(found[2].problem).toContain('height undeclared');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
