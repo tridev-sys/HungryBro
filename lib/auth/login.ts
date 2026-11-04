@@ -9,9 +9,10 @@ import { issueSession } from './session';
 
 export type LoginState = { step: 'phone' | 'otp'; phone?: string; error?: string };
 
-const REQUEST_ERRORS: Record<'INVALID_PHONE' | 'RATE_LIMITED', string> = {
+const REQUEST_ERRORS: Record<'INVALID_PHONE' | 'RATE_LIMITED' | 'SEND_FAILED', string> = {
   INVALID_PHONE: 'Enter a valid 10-digit Indian mobile number.',
   RATE_LIMITED: 'Too many codes requested for this number. Try again in an hour.',
+  SEND_FAILED: 'We could not send the code to this number. Please try again.',
 };
 
 const VERIFY_ERRORS: Record<'INVALID_PHONE' | 'WRONG_CODE' | 'EXPIRED_OR_LOCKED', string> = {

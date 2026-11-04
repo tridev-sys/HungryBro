@@ -44,3 +44,16 @@ test('wrong code returns the error copy and no token', async () => {
     ok: false, error: 'That code is not right.',
   });
 });
+
+test('a failed SMS send keeps the user on the phone step with a retry message', async () => {
+  const phone = randomPhone();
+  const failing = {
+    name: 'msg91' as const,
+    codeFor: () => '123456',
+    send: async () => ({ ok: false as const, code: 'OTP_SEND_FAILED' as const }),
+  };
+  const s = await sendOtpForPhone(pool, failing, phone);
+  expect(s.step).toBe('phone');
+  expect(s.phone).toBeUndefined();
+  expect(s.error).toBe('We could not send the code to this number. Please try again.');
+});
