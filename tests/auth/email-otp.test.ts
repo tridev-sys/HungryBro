@@ -40,10 +40,11 @@ test('email provider sends a 6-digit code to the address through SMTP and report
 test('a code sent by email verifies through the sign-in OTP path (DB round trip)', async () => {
   const smtp = fakeSmtp();
   const email = new EmailOtpProvider({ transport: smtp.transport, from: 'noreply@example.test' });
-  // The sign-in flow hands the provider the phone's E.164 value. This adapter maps it to a fixed
-  // test mailbox, which is the only way to exercise the verify path without a phone-to-email link.
+  // The sign-in flow hands the provider the phone's E.164 value. With SMS off (the email provider) a
+  // phone is refused before any challenge (PHONE_UNAVAILABLE), so this stand-in is named as the MSG91
+  // provider. It maps the code to a fixed test mailbox, which exercises the phone verify path only.
   const viaEmail = {
-    name: 'email' as const,
+    name: 'msg91' as const,
     codeFor: () => email.codeFor(),
     send: (_destination: string, code: string) => email.send('member@example.test', code),
   };

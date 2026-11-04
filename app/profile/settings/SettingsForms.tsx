@@ -4,17 +4,20 @@ import { useActionState } from 'react';
 import type { ProfileFormState } from '@/lib/profile/service';
 import {
   addVpaAction, removeVpaAction, setDefaultVpaAction, saveGstinAction,
+  requestEmailClaimAction, confirmEmailClaimAction, type EmailClaimFormState,
 } from './actions';
 
 export interface SettingsProfile {
   vpas: string[];
   defaultVpa: string | null;
   savedGstin: string | null;
+  email: string | null;
 }
 
 const initial: ProfileFormState = {};
+const initialEmail: EmailClaimFormState = {};
 
-function Feedback({ state }: { state: ProfileFormState }) {
+function Feedback({ state }: { state: ProfileFormState | EmailClaimFormState }) {
   if (state.error) return <p role="alert" className="text-sm text-red-700">{state.error}</p>;
   if (state.message) return <p className="text-sm text-green-700">{state.message}</p>;
   return null;
@@ -25,6 +28,8 @@ export function SettingsForms({ profile }: { profile: SettingsProfile }) {
   const [rowState, removeAction] = useActionState(removeVpaAction, initial);
   const [defaultState, setDefaultAction] = useActionState(setDefaultVpaAction, initial);
   const [gstinState, gstinAction, gstinPending] = useActionState(saveGstinAction, initial);
+  const [emailState, emailAction, emailPending] = useActionState(requestEmailClaimAction, initialEmail);
+  const [confirmState, confirmAction, confirmPending] = useActionState(confirmEmailClaimAction, initialEmail);
 
   return (
     <div className="flex flex-col gap-8">
@@ -67,6 +72,50 @@ export function SettingsForms({ profile }: { profile: SettingsProfile }) {
           </button>
         </form>
         <Feedback state={addState} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-medium">Email for sign-in</h2>
+        {profile.email ? (
+          <p className="font-mono text-sm">{profile.email} <span className="text-xs text-neutral-500">(verified)</span></p>
+        ) : (
+          <>
+            <p className="text-sm text-neutral-600">Add an email address and enter the code we send to it.</p>
+            <form action={emailAction} className="flex gap-2">
+              <input
+                name="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                required
+                className="min-h-11 flex-1 rounded border border-neutral-300 px-3 py-2"
+              />
+              <button type="submit" disabled={emailPending} className="min-h-11 rounded bg-neutral-900 px-4 py-2 text-white">
+                Send code
+              </button>
+            </form>
+            <Feedback state={emailState} />
+            {(confirmState.pendingEmail ?? emailState.pendingEmail) && !confirmState.message && (
+              <form action={confirmAction} className="flex gap-2">
+                <input type="hidden" name="email" value={confirmState.pendingEmail ?? emailState.pendingEmail} />
+                <input
+                  name="code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  placeholder="6-digit code"
+                  required
+                  className="min-h-11 flex-1 rounded border border-neutral-300 px-3 py-2 font-mono"
+                />
+                <button type="submit" disabled={confirmPending} className="min-h-11 rounded bg-neutral-900 px-4 py-2 text-white">
+                  Verify
+                </button>
+              </form>
+            )}
+            <Feedback state={confirmState} />
+          </>
+        )}
       </section>
 
       <section className="flex flex-col gap-3">

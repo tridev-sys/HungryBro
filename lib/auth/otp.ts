@@ -16,7 +16,7 @@ export function hashOtp(identifier: string, code: string): string {
 export type RequestOtpResult =
   | { ok: true; e164: string }
   | { ok: true; email: string }
-  | { ok: false; reason: 'INVALID_PHONE' | 'INVALID_EMAIL' | 'RATE_LIMITED' | 'SEND_FAILED' };
+  | { ok: false; reason: 'INVALID_PHONE' | 'INVALID_EMAIL' | 'RATE_LIMITED' | 'SEND_FAILED' | 'PHONE_UNAVAILABLE' };
 
 export type VerifyOtpResult =
   | { ok: true; e164: string }
@@ -31,6 +31,8 @@ export async function requestOtp(pool: pg.Pool, provider: OtpProvider, rawIdenti
   const id = normalizeIdentifier(rawIdentifier);
   if (!id) return { ok: false, reason: rawIdentifier.includes('@') ? 'INVALID_EMAIL' : 'INVALID_PHONE' };
   if (id.kind === 'email' && provider.name === 'msg91') return { ok: false, reason: 'SEND_FAILED' };
+  // SMS off (email provider): a phone sign-in is refused before a challenge row is written.
+  if (id.kind === 'phone' && provider.name === 'email') return { ok: false, reason: 'PHONE_UNAVAILABLE' };
 
   const code = provider.codeFor();
   const issueSql = id.kind === 'phone'

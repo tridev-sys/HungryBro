@@ -77,15 +77,16 @@ export async function saveGstin(
 export async function getProfile(
   pool: pg.Pool,
   userId: string,
-): Promise<{ vpas: string[]; defaultVpa: string | null; savedGstin: string | null }> {
+): Promise<{ vpas: string[]; defaultVpa: string | null; savedGstin: string | null; email: string | null }> {
   return asRole(pool, userId, async (c) => {
     const vpas = await c.query<{ vpa: string }>('SELECT vpa FROM user_vpas ORDER BY created_at, vpa');
-    const me = await c.query<{ default_vpa: string | null; saved_gstin: string | null }>(
-      'SELECT default_vpa, saved_gstin FROM users WHERE id = $1', [userId]);
+    const me = await c.query<{ default_vpa: string | null; saved_gstin: string | null; email: string | null }>(
+      'SELECT default_vpa, saved_gstin, email FROM users WHERE id = $1', [userId]);
     return {
       vpas: vpas.rows.map((r) => r.vpa),
       defaultVpa: me.rows[0]?.default_vpa ?? null,
       savedGstin: me.rows[0]?.saved_gstin ?? null,
+      email: me.rows[0]?.email ?? null,
     };
   });
 }

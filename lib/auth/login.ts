@@ -12,9 +12,10 @@ export type LoginState = { step: 'phone' | 'otp' | 'totp'; phone?: string; email
 
 const INVALID_IDENTIFIER = 'Enter a valid 10-digit Indian mobile number or email address.';
 
-const REQUEST_ERRORS: Record<'INVALID_PHONE' | 'INVALID_EMAIL' | 'RATE_LIMITED' | 'SEND_FAILED', string> = {
+const REQUEST_ERRORS: Record<'INVALID_PHONE' | 'INVALID_EMAIL' | 'RATE_LIMITED' | 'SEND_FAILED' | 'PHONE_UNAVAILABLE', string> = {
   INVALID_PHONE: INVALID_IDENTIFIER,
   INVALID_EMAIL: INVALID_IDENTIFIER,
+  PHONE_UNAVAILABLE: 'Sign-in by mobile number is not available right now. Sign in with your email address.',
   RATE_LIMITED: 'Too many codes requested for this number. Try again in an hour.',
   SEND_FAILED: 'We could not send the code to this number. Please try again.',
 };

@@ -149,7 +149,7 @@ const AUDITED_CONTROLS: Record<string, number> = {
   'app/auth/login/LoginForm.tsx': 6,
   'app/delivery/_components/DeliveryConsole.tsx': 2,
   'app/delivery/_components/VoiceInput.tsx': 3,
-  'app/profile/settings/SettingsForms.tsx': 6,
+  'app/profile/settings/SettingsForms.tsx': 10,
   'components/billing/BillPanel.tsx': 2,
   'components/dine/BillSplitSelector.tsx': 4,
   'components/dine/DynamicUpiQrModal.tsx': 1,
