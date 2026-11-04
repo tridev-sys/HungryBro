@@ -37,7 +37,7 @@ Out (roadmap or later plans):
 Open items (do not block this plan, must be resolved before pilot, see Acceptance):
 - The 2-second rating window is the spec's number. It is very tight for a human. The owner should confirm it.
 - MSG91 and Cashfree exact endpoints and header names are taken from their public docs as recalled; confirm against current docs during Task 3 and Task 8. Each is marked `VERIFY AGAINST CURRENT DOCS BEFORE IMPLEMENTING` where it is used.
-- Cashfree timestamp unit: this plan uses epoch milliseconds, and Plan 06 uses seconds. Unresolved; confirm against Cashfree docs before Task 8.
+- Cashfree timestamp unit: epoch milliseconds in this plan and in code. Plan 06 said seconds; its text is corrected and the code fix is d411f82. The production value is NOT VERIFIED until a live Cashfree webhook is checked.
 - Cashfree event id: this plan uses the signature header value, and Plan 06 uses `data.payment.cf_payment_id`. The signature changes with each timestamp, so it is not a stable replay key. Unresolved; choose one before Task 8.
 - Route path: this plan serves `/api/webhooks/razorpay` and `/api/webhooks/cashfree`; Plan 06 names `POST /api/payments/[provider]/webhook`. Unresolved; one path must be chosen and Plan 06 aligned.
 
@@ -1523,7 +1523,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - Open items before pilot (tracked, not blocking this merge):
   1. Owner confirms the 2-second rating window. It is enforced in the database (migration `004`, Task 1) and in `submitVerifiedRating` (Task 9).
   2. MSG91 endpoint, body fields, and template variables are confirmed against current MSG91 docs (VERIFY markers in Task 3).
-  3. Cashfree timestamp unit (this plan: epoch milliseconds; Plan 06: seconds), signature header names, and the event id (this plan: signature header value; Plan 06: `data.payment.cf_payment_id`) are confirmed against current Cashfree docs and aligned with Plan 06 before Task 8 is implemented.
+  3. Cashfree timestamp unit (epoch milliseconds in this plan, code and Plan 06 after d411f82; production still NOT VERIFIED against a live webhook), signature header names, and the event id (this plan: signature header value; Plan 06: `data.payment.cf_payment_id`) are confirmed against current Cashfree docs and aligned with Plan 06 before Task 8 is implemented.
   4. Route path: this plan serves `/api/webhooks/razorpay` and `/api/webhooks/cashfree`; Plan 06 names `POST /api/payments/[provider]/webhook`. One path must be chosen and Plan 06 aligned.
   5. Producers of `order_refs` `completed` status and `settled_at` (Plan 03 writes them at session close, after migration `004`; Plan 06 settles them from the verified payment webhook) are not built yet, so the rating path has no live caller until then.
   6. HTTP token-bucket rate limiting is Plan 07. The per-phone OTP limit (3 per hour) is in this plan.

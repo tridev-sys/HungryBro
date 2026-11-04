@@ -8,7 +8,7 @@ Matches column: `yes` = repo matches the verified value; `no` = mismatch that ne
 
 ## Summary of mismatches (need code fixes later)
 
-1. **Cashfree webhook timestamp unit (code is internally inconsistent).** `lib/payments/cashfree.ts` line 92 compares `Number(ts) * 1000` (seconds). `lib/payments/webhooks.ts` `verifyCashfreeSignature` compares the raw value to `nowMs` (milliseconds). The official example timestamp `1617695238078` is 13 digits (milliseconds). Real Cashfree webhooks would fail the freshness check in `cashfree.ts`. Fix: use milliseconds in one place, and make the two functions agree.
+1. **Cashfree webhook timestamp unit (code was internally inconsistent; RESOLVED in d411f82, see Round 2).** `lib/payments/cashfree.ts` line 92 compares `Number(ts) * 1000` (seconds). `lib/payments/webhooks.ts` `verifyCashfreeSignature` compares the raw value to `nowMs` (milliseconds). The official example timestamp `1617695238078` is 13 digits (milliseconds). Real Cashfree webhooks would fail the freshness check in `cashfree.ts`. Fix: use milliseconds in one place, and make the two functions agree.
 2. **Cashfree `x-api-version`.** Repo sends `2023-08-01` (`lib/payments/cashfree.ts` line 53). The current spec example is `2026-01-01`. `2023-08-01` may still be accepted, but it is not the current version. Confirm before changing.
 3. **Cartesia model.** Repo sends `model_id: 'sonic-2'` (`lib/voice/providers/cartesia.ts` line 25). The current `tts/bytes` enum is `sonic-3.6`, `sonic-3.5`, `sonic-3`, `sonic-latest`. `sonic-2` is not listed. Mismatch.
 4. **Cartesia auth header.** Repo sends `X-API-Key` (line 19). The current `tts/bytes` OpenAPI spec defines an HTTP bearer scheme (`Authorization: Bearer <key>`). The `X-API-Key` header appears in older endpoint examples. Mismatch for `tts/bytes`; confirm against the live API before changing.
@@ -32,7 +32,7 @@ Matches column: `yes` = repo matches the verified value; `no` = mismatch that ne
 | Cashfree | Webhook timestamp header | `x-webhook-timestamp` | same | 2026-11-03 | `x-webhook-timestamp` (line 90) | yes |
 | Cashfree | Signature algorithm and encoding | HMAC-SHA256, base64 output | same | 2026-11-03 | `createHmac('sha256').digest('base64')` (`lib/payments/webhooks.ts` line 39) | yes |
 | Cashfree | Signed string | Timestamp concatenated directly with raw body (no separator). Note: the doc's pseudocode shows `$timestamp.$payload` with a dot, but the manual code examples concatenate with no separator. The examples are treated as authoritative; confirm with the Dev Studio Webhook Verification tool before going live. | same | 2026-11-03 | `timestamp + rawBody` (line 39) | yes (with the ambiguity noted) |
-| Cashfree | Timestamp unit | NOT STATED in text. The example value `1617695238078` is 13 digits, which is milliseconds. Treat as milliseconds (inferred from the example, not stated). | same | 2026-11-03 | `cashfree.ts` line 92 uses seconds (`* 1000`); `webhooks.ts` uses milliseconds. Plan 06 assumes seconds. | no (see mismatch 1) |
+| Cashfree | Timestamp unit | NOT STATED in text. The example value `1617695238078` is 13 digits, which is milliseconds. Treat as milliseconds (inferred from the example, not stated). | same | 2026-11-03 | `cashfree.ts` line 92 uses seconds (`* 1000`); `webhooks.ts` uses milliseconds. Plan 06 assumes seconds. | no in Round 1; yes after d411f82 (see Round 2). Production value NOT VERIFIED until a live webhook is checked |
 | Cashfree | Webhook secret | Doc says to use the PG secret key (client secret) for PG webhooks; the partner API key is used for partner webhooks | same | 2026-11-03 | `CASHFREE_WEBHOOK_SECRET` env var | unknown (confirm whether the webhook secret is the client secret or a separate value in the dashboard) |
 | Cashfree | Success event type | `PAYMENT_SUCCESS_WEBHOOK` | https://www.cashfree.com/docs/api-reference/payments/latest/payments/webhooks (search snippet and payload sample; not directly quoted) | 2026-11-03 | `PAYMENT_SUCCESS_WEBHOOK` maps to `payment.captured` (plan 06) | yes (from search snippet; treat as verified-by-sample) |
 | Cashfree | Failed event type | NOT VERIFIED. `PAYMENT_FAILED_WEBHOOK` not confirmed in any fetched official text. | same | 2026-11-03 | `PAYMENT_FAILED_WEBHOOK` | unknown |
@@ -75,7 +75,7 @@ Matches column: `yes` = repo matches the verified value; `no` = mismatch that ne
 
 ## Other findings for the code owner
 
-- `lib/payments/cashfree.ts` line 92 (seconds) and `lib/payments/webhooks.ts` (milliseconds) disagree. Pick milliseconds (per the official example) and fix both, plus the Plan 06 open item.
+- `lib/payments/cashfree.ts` line 92 (seconds) and `lib/payments/webhooks.ts` (milliseconds) disagree. Pick milliseconds (per the official example) and fix both, plus the Plan 06 open item. Done in d411f82 and the docs follow-up.
 - Cashfree phone placeholder `9999999999` must be replaced with the verified diner phone (plan 05), as the plan already says.
 - Plan 04 says Deepgram streaming; repo implements pre-recorded REST. Decide which mode is intended before the first live call.
 
@@ -112,4 +112,4 @@ Method: WebFetch on official pages, WebSearch (standard and extended, some restr
 | POS Restroworks webhook signature | NOT CONFIRMED | search: "Restroworks API webhook signature verification docs" (no Restroworks source returned) | Repo unchanged. Question for Restroworks: "What is the signature header name, algorithm and signed payload for webhooks, and is a timestamp included?" |
 | POS UrbanPiper webhook signature | NOT CONFIRMED | search: "UrbanPiper webhook signature header HMAC secret developers.urbanpiper.com" (no UrbanPiper source returned); https://developers.urbanpiper.com/ (Round 1, no content) | Repo unchanged. Question for UrbanPiper: "What is the webhook signature header, algorithm, encoding, secret issuance, and timestamp rule?" |
 
-Out of scope for this round but still open: the Cashfree timestamp unit mismatch (`lib/payments/cashfree.ts` seconds vs `lib/payments/webhooks.ts` milliseconds) from Round 1, mismatch 1. Not changed here.
+Cashfree timestamp unit (Round 1, mismatch 1): FIXED in d411f82. `lib/payments/cashfree.ts` now compares `x-webhook-timestamp` to `nowMs` in epoch milliseconds, the same unit as `lib/payments/webhooks.ts`; the 5-minute window is unchanged. Plan 06 text and code comments were corrected in the docs follow-up. The production value is NOT VERIFIED until a live Cashfree webhook is checked.

@@ -4,7 +4,8 @@ import { asRole } from '@/lib/db/client';
 import { constantTimeEqual } from '@/lib/security/timing';
 
 // VERIFY AGAINST CURRENT DOCS BEFORE IMPLEMENTING (Cashfree): the signed string, base64 encoding,
-// and the timestamp unit. This module uses epoch milliseconds; Plan 06 assumes seconds (see plan open items).
+// and the timestamp unit. This module uses epoch milliseconds, the same unit as lib/payments/cashfree.ts
+// (fixed in d411f82; Plan 06 originally said seconds). The production unit is NOT VERIFIED until a live Cashfree webhook is checked.
 export const CASHFREE_TOLERANCE_MS = 300_000;
 
 const HEX_SIG = /^[0-9a-f]{64}$/i;

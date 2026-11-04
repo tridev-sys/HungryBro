@@ -118,7 +118,7 @@ These decisions let the build continue while vendor answers and owner items are 
 
 **Payments**
 - **Cashfree `x-api-version`: keep `2023-08-01`.** Status: DECIDED, pending vendor. Reason: no Cashfree source confirms that `2026-01-01` is backward compatible for `POST /pg/orders` and `PAYMENT_SUCCESS_WEBHOOK`, and the migration page lists breaking changes in the 2023-08-01 line. Evidence: `lib/payments/cashfree.ts:53`. Trigger: Cashfree confirms in writing that `2026-01-01` is compatible for both calls, including the `cf_payment_id` type and the response fields we read. Question to send: "Is `x-api-version: 2023-08-01` still accepted for POST /pg/orders and PAYMENT_SUCCESS_WEBHOOK, and is 2026-01-01 backward compatible for those two?"
-- **Cashfree webhook timestamp unit: milliseconds (stale finding closed).** Status: DECIDED, in code. The Round 1 "mismatch 1" is out of date. `lib/payments/cashfree.ts:92-93` and `lib/payments/webhooks.ts:37` both compare `x-webhook-timestamp` in epoch milliseconds, with a 5-minute window. Plan 06 still says seconds; that plan text needs the same correction when Plan 06 is next edited.
+- **Cashfree webhook timestamp unit: milliseconds (stale finding closed).** Status: DECIDED, in code (fixed in d411f82). The Round 1 "mismatch 1" is out of date. `lib/payments/cashfree.ts:92-93` and `lib/payments/webhooks.ts:37` both compare `x-webhook-timestamp` in epoch milliseconds, with a 5-minute window. Plan 06 said seconds; its text is now corrected to milliseconds. The production value is still NOT VERIFIED until a live Cashfree webhook is checked.
 - **Razorpay:** no change. Event names `payment.captured` and `payment.failed` are confirmed in Round 2.
 
 **Auth (MSG91)**
@@ -143,4 +143,4 @@ These decisions let the build continue while vendor answers and owner items are 
 
 ## Evidence notes (2026-11-04)
 
-- The Round 1 "mismatch 1" (Cashfree timestamp unit) and the Round 1 Deepgram "REST in repo" note are stale. The code now uses milliseconds for Cashfree and streaming for Deepgram. The verification doc should be updated in the next docs pass.
+- The Round 1 "mismatch 1" (Cashfree timestamp unit) and the Round 1 Deepgram "REST in repo" note are stale. The code now uses milliseconds for Cashfree and streaming for Deepgram. The verification doc's Round 2 status records the fix (d411f82); the production value stays NOT VERIFIED until a live webhook is checked.
