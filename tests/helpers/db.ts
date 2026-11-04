@@ -1,31 +1,7 @@
 import { encryptCredentials, loadPosKey } from '../../lib/pos/credentials';
 import pg from 'pg';
+import { withClusterLock } from '../setup/cluster-lock';
 import { randomUUID, randomInt } from 'node:crypto';
-
-const CLUSTER_LOCK_KEY = 'food_os_test_cluster_ddl';
-
-// Runs fn while holding a lock shared by every test run on this server. Roles and role memberships
-// are cluster-wide catalogs, so two runs writing them at once fail with "tuple concurrently updated".
-// pg_advisory_lock is scoped to the database it is taken in, and each run has its own database, so
-// the lock is taken in the maintenance database 'postgres', which all runs share.
-export async function withClusterLock<T>(fn: () => Promise<T>): Promise<T> {
-  const raw = process.env.ADMIN_DATABASE_URL;
-  if (!raw) throw new Error('ADMIN_DATABASE_URL is not set');
-  const url = new URL(raw);
-  url.pathname = '/postgres';
-  const lock = new pg.Client({ connectionString: url.toString() });
-  await lock.connect();
-  try {
-    await lock.query('SELECT pg_advisory_lock(hashtext($1))', [CLUSTER_LOCK_KEY]);
-    try {
-      return await fn();
-    } finally {
-      await lock.query('SELECT pg_advisory_unlock(hashtext($1))', [CLUSTER_LOCK_KEY]);
-    }
-  } finally {
-    await lock.end();
-  }
-}
 
 // Sets food_app_login's password to the one in APP_DATABASE_URL, so the runtime pool can connect
 // in tests. Test database only. The role DDL runs under withClusterLock, so concurrent runs

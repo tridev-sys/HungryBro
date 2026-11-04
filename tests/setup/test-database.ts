@@ -10,15 +10,10 @@
 import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { runMigrations } from '../../lib/db/migrate';
+import { createDatabase, withDatabase } from './create-database';
 
 const PREFIX = 'food_os_test_';
 const NAME_RE = /^food_os_test_[a-z0-9]{6,40}$/;
-
-function withDatabase(raw: string, dbName: string): string {
-  const url = new URL(raw);
-  url.pathname = `/${dbName}`;
-  return url.toString();
-}
 
 function assertTestName(name: string): void {
   if (!NAME_RE.test(name) || name === 'food_os') {
@@ -45,13 +40,8 @@ export async function setup(): Promise<void> {
   const name = `${PREFIX}${runId}`;
   assertTestName(name);
 
-  const maint = new pg.Client({ connectionString: withDatabase(adminRaw, 'postgres') });
-  await maint.connect();
-  try {
-    await maint.query(`CREATE DATABASE "${name}"`);
-  } finally {
-    await maint.end();
-  }
+  // Serialized with other runs on this server, and retried while template1 is busy (logged).
+  await createDatabase(adminRaw, name);
 
   // Record the name before migrating, so teardown can drop it even if migrations fail.
   process.env.TEST_DB_NAME = name;

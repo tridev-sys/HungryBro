@@ -38,22 +38,38 @@ trap cleanup EXIT
 echo "run_id=$RUN_ID database=$DB_NAME"
 echo "food_os before: $(food_os_counts)"
 
+LOG_DIR="$WT/test-results"
+LOG_FILE="$LOG_DIR/isolated-$RUN_ID.log"
+mkdir -p "$LOG_DIR"
+
+# The full vitest output goes to test-results/ (git-ignored) inside the worktree. The console gets
+# only the summary and the first error block of each failed file (scripts/tests/vitest-summary.sh).
 set +e
-docker run --rm --network host -v "$WT":/app -w /app \
+docker run --rm --network host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$WT":/app -w /app \
   -e TEST_DB_RUN_ID="$RUN_ID" \
+  -e VITEST_LOG="/app/test-results/isolated-$RUN_ID.log" \
   -e ADMIN_DATABASE_URL="postgres://food:${POSTGRES_PASSWORD}@127.0.0.1:5432/food_os" \
   -e APP_DATABASE_URL="postgres://food_app_login:${APP_DB_PASSWORD}@127.0.0.1:5432/food_os" \
   -e SYNC_DATABASE_URL="postgres://food_sync:test-sync-only@127.0.0.1:5432/food_os" \
   -e DATABASE_URL="postgres://food_app_login:${APP_DB_PASSWORD}@127.0.0.1:5432/food_os" \
   -e REDIS_URL=redis://127.0.0.1:6379 \
   -e AUTH_JWT_SECRET=test-only-secret-not-for-production \
-  node:22-alpine sh -c 'npx vitest run "$@" > /tmp/vitest.log 2>&1; rc=$?; sed "s/\x1b\[[0-9;]*m//g" /tmp/vitest.log | grep -E "Test Files|Tests |FAIL|Error" | head -80; exit $rc' sh "$@"
+  node:22-alpine sh -c 'npx vitest run "$@" > "$VITEST_LOG" 2>&1; exit $?' sh "$@"
 RC=$?
 set -e
+
+echo "----- vitest summary (full log: $LOG_FILE) -----"
+if [ -f "$LOG_FILE" ]; then
+  "$(dirname "$0")/vitest-summary.sh" "$LOG_FILE" || true
+else
+  echo "no vitest log was written to $LOG_FILE"
+fi
 
 LEFT="$(psql_q postgres "select count(*) from pg_database where datname = '$DB_NAME'")"
 echo "per-run database remaining after run: $LEFT"
 echo "food_os after: $(food_os_counts)"
+
+echo "full vitest log: $LOG_FILE"
 
 if [ "$LEFT" != "0" ]; then
   echo "FAIL: per-run database $DB_NAME was not dropped" >&2
