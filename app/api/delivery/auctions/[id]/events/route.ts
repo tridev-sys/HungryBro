@@ -1,9 +1,10 @@
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool, asRole } from '@/lib/db/client';
 import { HttpError, resolveDiner } from '@/lib/delivery/diner';
 import { closeIfDue, readCounterBids } from '@/lib/auction/auction-repository';
 import { createPostgisKitchenRepository } from '@/lib/auction/kitchen-repository';
 import { assertSandboxDispatchMode, createSandboxDispatch } from '@/lib/dispatch/sandbox';
-import { createMeshBus } from '@/lib/mesh/bus';
+import { createMeshBus, MeshBusUnavailableError, withBusDeadline } from '@/lib/mesh/bus';
 import { auctionEventsChannel } from '@/lib/mesh/geohash';
 
 export const runtime = 'nodejs';
@@ -19,7 +20,7 @@ const json = (body: unknown, status: number) =>
 // Event contract: snapshot (first), bid (per counter-bid), status (on change),
 // dispatch (once, after award, with the handshake token for this diner only), and
 // a ': ping' comment every 15 s. Subscribes before the snapshot so no bid is missed.
-export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
+async function handleGet(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
   const { id } = await ctx.params;
   const pool = await getPool();
 
@@ -40,16 +41,34 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   const kitchens = createPostgisKitchenRepository(pool);
   const bus = createMeshBus();
 
+  // First bus contact happens before the response is committed, so a down bus answers 503
+  // MESH_BUS_UNAVAILABLE instead of opening a stream that never delivers. The subscription is
+  // made before the snapshot so no bid is missed. Bids are forwarded once the stream exists; no
+  // await separates the subscribe resolving from the stream being constructed.
+  const out: { controller?: ReadableStreamDefaultController<Uint8Array> } = {};
   let closed = false;
   let unsubscribe: (() => Promise<void>) | undefined;
   let tickTimer: ReturnType<typeof setInterval> | undefined;
   let pingTimer: ReturnType<typeof setInterval> | undefined;
+  const send = (event: string, data: unknown) => {
+    if (!closed) out.controller?.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+  };
+
+  try {
+    unsubscribe = await withBusDeadline(
+      bus.subscribe([auctionEventsChannel(id)], (_ch, msg) => send('bid', msg)),
+    );
+  } catch (err) {
+    void bus.close().catch(() => undefined);
+    if (err instanceof MeshBusUnavailableError) {
+      return json({ error: 'mesh bus unavailable', code: 'MESH_BUS_UNAVAILABLE' }, 503);
+    }
+    throw err;
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (event: string, data: unknown) => {
-        if (!closed) controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-      };
+      out.controller = controller;
       const cleanup = async () => {
         if (closed) return;
         closed = true;
@@ -69,7 +88,6 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       req.signal.addEventListener('abort', () => void cleanup());
 
       try {
-        unsubscribe = await bus.subscribe([auctionEventsChannel(id)], (_ch, msg) => send('bid', msg));
         pingTimer = setInterval(() => {
           if (!closed) controller.enqueue(enc.encode(': ping\n\n'));
         }, PING_MS);
@@ -140,3 +158,5 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     },
   });
 }
+
+export const GET = withApiGuards(handleGet, { sessionToken: publicSessionToken });

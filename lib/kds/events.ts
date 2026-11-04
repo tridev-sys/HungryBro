@@ -1,12 +1,21 @@
 import { createSubscriber, getRedis } from '@/lib/redis';
 import type { TicketView } from './ticket-view';
 
-export interface KdsEvent {
+export interface TicketKdsEvent {
   type: 'ticket.fired' | 'ticket.updated';
   restaurantId: string;
   sessionId: string | null;
   ticket: TicketView;
 }
+
+/** A table session closed after its payment shares all settled. Published once, after commit. */
+export interface SessionSettledEvent {
+  type: 'session.settled';
+  restaurantId: string;
+  sessionId: string;
+}
+
+export type KdsEvent = TicketKdsEvent | SessionSettledEvent;
 
 export function kdsChannel(restaurantId: string): string {
   return `kds:restaurant:${restaurantId}`;

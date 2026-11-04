@@ -1,3 +1,4 @@
+import type pg from 'pg';
 import { quoteBundle } from '@/lib/pricing';
 import type { DeliveryIntent, LatLng, StationCategory } from '@/types/food-os';
 
@@ -53,7 +54,11 @@ export interface KitchenSearch {
 }
 
 export interface KitchenRepository {
-  findCandidates(search: KitchenSearch): Promise<KitchenCandidate[]>;
+  /**
+   * When `client` is given, the search runs on that connection (the caller's transaction) and
+   * must not take another pool connection.
+   */
+  findCandidates(search: KitchenSearch, client?: pg.PoolClient): Promise<KitchenCandidate[]>;
 }
 
 export function evaluateCounterBids(
@@ -103,6 +108,7 @@ export function evaluateCounterBids(
 export async function matchKitchenNodes(
   repo: KitchenRepository,
   intent: DeliveryIntent,
+  client?: pg.PoolClient,
 ): Promise<KitchenCandidate[]> {
   const found = await repo.findCandidates({
     point: intent.client_coordinates,
@@ -110,6 +116,6 @@ export async function matchKitchenNodes(
     maxLoad: AUCTION_MAX_LOAD,
     items: intent.items_requested.map((i) => ({ query: i.query, servingTarget: i.serving_target })),
     dietaryProfiles: intent.target_dietary_profiles,
-  });
+  }, client);
   return found.filter((c) => c.activeKdsLoad < AUCTION_MAX_LOAD && c.distanceM <= TRANSIT_RADIUS_M);
 }

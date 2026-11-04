@@ -24,11 +24,11 @@ export function LoginForm() {
             pattern="\d{6}"
             maxLength={6}
             required
-            className="rounded border border-neutral-300 px-3 py-2 text-lg tracking-widest"
+            className="min-h-11 rounded border border-neutral-300 px-3 py-2 text-lg tracking-widest"
           />
         </label>
         {verifyState.error && <p role="alert" className="text-sm text-red-700">{verifyState.error}</p>}
-        <button type="submit" disabled={verifyPending} className="rounded bg-neutral-900 px-4 py-2 text-white">
+        <button type="submit" disabled={verifyPending} className="min-h-11 rounded bg-neutral-900 px-4 py-2 text-white">
           {verifyPending ? 'Checking...' : 'Verify and continue'}
         </button>
       </form>
@@ -45,11 +45,11 @@ export function LoginForm() {
           inputMode="tel"
           autoComplete="tel-national"
           required
-          className="rounded border border-neutral-300 px-3 py-2 text-lg"
+          className="min-h-11 rounded border border-neutral-300 px-3 py-2 text-lg"
         />
       </label>
       {sendState.error && <p role="alert" className="text-sm text-red-700">{sendState.error}</p>}
-      <button type="submit" disabled={sendPending} className="rounded bg-neutral-900 px-4 py-2 text-white">
+      <button type="submit" disabled={sendPending} className="min-h-11 rounded bg-neutral-900 px-4 py-2 text-white">
         {sendPending ? 'Sending...' : 'Send code'}
       </button>
     </form>

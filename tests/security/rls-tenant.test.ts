@@ -127,9 +127,11 @@ describe('staff of restaurant X against restaurant Y', () => {
   });
 
   test('cannot read restaurant Y dining tables', async () => {
-    const rows = await asApp({ userId: w.staffX }, async (c) =>
-      (await c.query('SELECT id, current_signature_token FROM dining_tables WHERE restaurant_id = $1', [w.rY])).rows);
-    expect(rows).toHaveLength(0);
+    // Owner decision: the runtime role has no column privilege on current_signature_token, so the
+    // read is refused with permission denied before RLS filters any row.
+    await expect(asApp({ userId: w.staffX }, async (c) =>
+      (await c.query('SELECT id, current_signature_token FROM dining_tables WHERE restaurant_id = $1', [w.rY])).rows))
+      .rejects.toThrow(/permission denied/);
   });
 
   test('cannot change restaurant Y dining table signatures', async () => {
@@ -201,9 +203,10 @@ describe('staff of restaurant X against restaurant Y', () => {
 
 describe('unauthenticated (no user in session) connection', () => {
   test('cannot read restaurant dining tables or their signatures', async () => {
-    const rows = await asApp({}, async (c) =>
-      (await c.query('SELECT current_signature_token FROM dining_tables WHERE restaurant_id = $1', [w.rY])).rows);
-    expect(rows).toHaveLength(0);
+    // Owner decision: refused with permission denied. The signature token is not readable by the app login.
+    await expect(asApp({}, async (c) =>
+      (await c.query('SELECT current_signature_token FROM dining_tables WHERE restaurant_id = $1', [w.rY])).rows))
+      .rejects.toThrow(/permission denied/);
   });
 
   test('cannot read kds tickets, auctions or order_refs', async () => {

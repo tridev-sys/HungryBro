@@ -2,7 +2,6 @@ import type pg from 'pg';
 import { asSession } from '@/lib/db/session';
 import { CartUpdateSchema } from '@/types/food-os';
 import type { StationCategory, TicketStatus } from '@/types/food-os';
-import { gstOn, round2 } from '@/lib/pricing';
 import { allowsCartChanges } from './session-state';
 import type { TicketItem, TicketView } from '@/lib/kds/ticket-view';
 import { publishKdsEvent } from '@/lib/kds/events';
@@ -67,10 +66,7 @@ export async function applyCartUpdate(
 
   const result = await asSession(pool, { sessionToken: input.sessionToken }, async (c) => {
     const s = await c.query<{ id: string; status: 'active' | 'payment_pending' | 'closed' | 'abandoned'; restaurant_id: string; table_number: string }>(
-      `SELECT s.id, s.status, dt.restaurant_id, dt.table_number
-         FROM tabletop_sessions s JOIN dining_tables dt ON dt.id = s.table_id
-        WHERE s.session_token = $1
-        FOR UPDATE OF s`,
+      `SELECT id, status, restaurant_id, table_number FROM app_lock_session($1)`,
       [input.sessionToken]);
     const session = s.rows[0];
     if (!session || !allowsCartChanges(session.status)) throw new Error('SESSION_NOT_OPEN');
@@ -80,7 +76,7 @@ export async function applyCartUpdate(
 
     if (cart.action === 'BILL_SPLIT') {
       if (cart.items.length > 0) throw new Error('NO_ITEMS_ON_SPLIT');
-      await c.query(`UPDATE tabletop_sessions SET bill_split_spec = $2 WHERE id = $1`, [sessionId, JSON.stringify({
+      await c.query('SELECT app_set_bill_split_spec($1, $2)', [input.sessionToken, JSON.stringify({
         strategy: cart.split_metadata?.split_strategy ?? 'EQUAL',
         contributor_count: cart.split_metadata?.contributor_count ?? 1,
         participants: [],
@@ -164,16 +160,12 @@ export async function applyCartUpdate(
       tickets.push(toTicketView(r.rows[0], tableNumber));
     }
 
-    // Subtotal from every line in the session, in integer paise.
-    const lines = await c.query<{ unit_price: number; quantity: number }>(
-      `SELECT unit_price::float8 AS unit_price, quantity FROM tabletop_order_lines WHERE session_id = $1`,
+    // Totals are computed in the database from the session's lines (migration 008).
+    await c.query('SELECT app_recalculate_session_totals($1)', [input.sessionToken]);
+    const totals = await c.query<{ subtotal: number; total: number }>(
+      `SELECT subtotal::float8 AS subtotal, total_amount::float8 AS total FROM tabletop_sessions WHERE id = $1`,
       [sessionId]);
-    const paise = lines.rows.reduce((acc, l) => acc + Math.round(l.unit_price * 100) * l.quantity, 0);
-    const subtotal = round2(paise / 100);
-    const tax = gstOn(subtotal);
-    const total = round2(subtotal + tax);
-    await c.query('UPDATE tabletop_sessions SET subtotal = $2, tax_amount = $3, total_amount = $4 WHERE id = $1',
-      [sessionId, subtotal, tax, total]);
+    const { subtotal, total } = totals.rows[0];
 
     return { tickets, subtotal, total };
   });

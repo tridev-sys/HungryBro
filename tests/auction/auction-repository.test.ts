@@ -75,3 +75,29 @@ test('closeIfDue with no valid bids marks the auction expired', async () => {
   const res = await closeIfDue(pool, s.diner, a, { kitchens, dispatch });
   expect(res.status).toBe('expired');
 });
+
+// Regression: closeIfDue used to take a second pool connection for the kitchen search while
+// holding the auction row lock. With 20 closers on the 10-connection pool, every connection
+// ended up waiting and nothing resolved (self-deadlock). All closers must now resolve.
+test('20 concurrent closeIfDue on one due auction: exactly one award, one dispatch, all resolve in 10 s', async () => {
+  const s = await setup();
+  const a = await makeAuction(admin, s.diner, { createdAgoSeconds: 1, intent: s.intent });
+  await submitCounterBid(pool, s.staff, a, { restaurantId: s.r, offeredPriceInr: 700, estimatedPrepMinutes: 12, bundleContents: s.bundle });
+  await admin.query(`UPDATE mesh_food_auctions SET created_at = created_at - INTERVAL '18 seconds' WHERE id = $1`, [a]);
+
+  const closers = Array.from({ length: 20 }, () => closeIfDue(pool, s.diner, a, { kitchens, dispatch }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), 10_000); });
+  const outcome = await Promise.race([Promise.allSettled(closers), timedOut]);
+  clearTimeout(timer);
+
+  expect(outcome).not.toBe('timeout');
+  const results = outcome as PromiseSettledResult<Awaited<ReturnType<typeof closeIfDue>>>[];
+  expect(results.every((r) => r.status === 'fulfilled')).toBe(true);
+  const values = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+  expect(values.filter((v) => v.award).length).toBe(1);
+  expect(values.filter((v) => v.dispatch).length).toBe(1);
+  expect(values.every((v) => v.status === 'awarded')).toBe(true);
+  const { rows } = await admin.query(`SELECT status, awarded_restaurant_id FROM mesh_food_auctions WHERE id = $1`, [a]);
+  expect(rows[0]).toEqual({ status: 'awarded', awarded_restaurant_id: s.r });
+}, 20_000);

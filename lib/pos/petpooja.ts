@@ -16,7 +16,17 @@ const menuSchema = z.object({
 });
 const stockSchema = z.object({
   data: z.object({ itemid: z.string().min(1), instock: z.union([z.string(), z.number()]) }),
+  // Optional event time. The synthetic fixture carries none. VERIFY the provider's field and unit.
+  timestamp: z.union([z.number(), z.string()]).optional(),
 });
+
+// Epoch seconds below 1e12, otherwise milliseconds (VERIFY against provider docs).
+function eventTimeMs(raw: number | string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return n < 1e12 ? n * 1000 : n;
+}
 
 function mapMenu(providerMenu: unknown): MenuItemUpsert[] {
   const parsed = menuSchema.safeParse(providerMenu);
@@ -57,6 +67,7 @@ export const petpoojaAdapter: PosAdapter = {
           kind: 'stock',
           pos_item_code: parsed.data.data.itemid,
           is_in_stock: String(parsed.data.data.instock) === '1',
+          occurredAtMs: eventTimeMs(parsed.data.timestamp),
         };
       }
       case 'menu.sync':

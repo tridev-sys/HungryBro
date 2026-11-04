@@ -8,7 +8,7 @@ import { canSubmitRating, toggleTag } from './rating-state';
 export interface RatingModalProps {
   orderRefId: string;
   restaurantName: string;
-  onSubmitted: () => void;
+  onSubmitted?: () => void;
   onClose: () => void;
 }
 
@@ -26,6 +26,7 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
   const [tags, setTags] = useState<RatingTag[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   async function submit() {
     if (!canSubmitRating(score, tags)) return;
@@ -38,7 +39,8 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
         body: JSON.stringify({ order_ref_id: orderRefId, rating_score: score, review_tags: tags }),
       });
       if (res.ok) {
-        onSubmitted();
+        setSaved(true);
+        onSubmitted?.();
         return;
       }
       const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -51,54 +53,77 @@ export function RatingModal({ orderRefId, restaurantName, onSubmitted, onClose }
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="rating-title" className="fixed inset-0 flex items-end justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-t-2xl bg-white p-6 shadow-xl">
+    <div role="dialog" aria-modal="true" aria-labelledby="rating-title" className="fixed inset-0 flex items-end justify-center bg-[var(--color-bg)]/70 p-4">
+      <div className="w-full max-w-md rounded-t-[var(--radius-card)] bg-[var(--color-surface)] p-6 text-[var(--color-text)] shadow-xl">
         <h2 id="rating-title" className="text-lg font-semibold">Rate your experience (verified order)</h2>
-        <p className="mt-1 text-sm text-neutral-600">{restaurantName}</p>
-        <p className="mt-1 text-xs text-neutral-500">Only diners with verified, completed payments can submit ratings.</p>
+        <p className="mt-1 text-sm text-[var(--color-text-muted)]">{restaurantName}</p>
+        <p className="mt-1 text-xs text-[var(--color-text-muted)]">Only diners with verified, completed payments can submit ratings.</p>
 
-        <div role="radiogroup" aria-label="Star rating" className="mt-4 flex gap-2">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button
-              key={n}
-              type="button"
-              role="radio"
-              aria-label={`${n} star${n === 1 ? '' : 's'}`}
-              aria-checked={score === n}
-              onClick={() => setScore(n)}
-              className="rounded p-1"
-            >
-              <Star className={n <= (score ?? 0) ? 'fill-amber-400 text-amber-400' : 'text-neutral-300'} size={32} />
-            </button>
-          ))}
-        </div>
+        {saved ? (
+          <p role="status" className="mt-4 text-sm font-medium text-[var(--color-accent)]">
+            Thank you. Your rating for this order is saved.
+          </p>
+        ) : (
+          <>
+            <div role="radiogroup" aria-label="Star rating" className="mt-4 flex gap-2">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  role="radio"
+                  aria-label={`${n} star${n === 1 ? '' : 's'}`}
+                  aria-checked={score === n}
+                  onClick={() => setScore(n)}
+                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded p-1"
+                >
+                  <Star
+                    className={n <= (score ?? 0) ? 'fill-[var(--color-sla-yellow)] text-[var(--color-sla-yellow)]' : 'text-[var(--color-text-muted)]'}
+                    size={32}
+                  />
+                </button>
+              ))}
+            </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {RATING_TAGS.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              aria-pressed={tags.includes(tag)}
-              onClick={() => setTags((prev) => toggleTag(prev, tag))}
-              className={`rounded-full border px-3 py-1 text-sm ${tags.includes(tag) ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-300'}`}
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {RATING_TAGS.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  aria-pressed={tags.includes(tag)}
+                  onClick={() => setTags((prev) => toggleTag(prev, tag))}
+                  className={`inline-flex min-h-11 items-center rounded-[var(--radius-pill)] border px-3 py-1 text-sm ${
+                    tags.includes(tag)
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-ink)]'
+                      : 'border-[var(--color-surface-2)] bg-[var(--color-surface-2)]'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
-        {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
+        {error && !saved && <p role="alert" className="mt-3 text-sm text-[var(--color-sla-red)]">{error}</p>}
 
         <div className="mt-6 flex justify-end gap-3">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm">Not now</button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={submitting || !canSubmitRating(score, tags)}
-            className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-40"
-          >
-            {submitting ? 'Submitting...' : 'Submit rating'}
-          </button>
+          {saved ? (
+            <button type="button" onClick={onClose} className="min-h-11 rounded-[var(--radius-pill)] bg-[var(--color-accent)] px-4 py-2 text-sm text-[var(--color-accent-ink)]">
+              Done
+            </button>
+          ) : (
+            <>
+              <button type="button" onClick={onClose} className="min-h-11 px-4 py-2 text-sm">Not now</button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={submitting || !canSubmitRating(score, tags)}
+                className="min-h-11 rounded-[var(--radius-pill)] bg-[var(--color-accent)] px-4 py-2 text-sm text-[var(--color-accent-ink)] disabled:opacity-40"
+              >
+                {submitting ? 'Submitting...' : 'Submit rating'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
