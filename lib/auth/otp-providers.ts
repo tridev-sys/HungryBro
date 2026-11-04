@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto';
+import nodemailer from 'nodemailer';
 
 export const DEV_OTP_CODE = '123456';
 export const OTP_TTL_SECONDS = 300;
@@ -6,10 +7,81 @@ export const OTP_MAX_ATTEMPTS = 5;
 
 export type OtpSendResult = { ok: true } | { ok: false; code: 'OTP_SEND_FAILED' };
 
+// The destination is whatever the provider delivers to: an E.164 number for MSG91, an email address
+// for the email provider. The dev provider ignores it.
 export interface OtpProvider {
-  readonly name: 'msg91' | 'dev';
+  readonly name: 'email' | 'msg91' | 'dev';
   codeFor(): string;
-  send(e164: string, code: string): Promise<OtpSendResult>;
+  send(destination: string, code: string): Promise<OtpSendResult>;
+}
+
+export interface MailMessage {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+}
+
+/** The part of a nodemailer transporter the provider uses. Tests pass a fake. */
+export interface MailTransport {
+  sendMail(msg: MailMessage): Promise<unknown>;
+}
+
+export interface SmtpConfig {
+  host: string;
+  port: number;
+  user?: string;
+  pass?: string;
+  from: string;
+}
+
+export interface EmailOtpOptions {
+  transport: MailTransport;
+  from: string;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Sends the sign-in code by email through standard SMTP (nodemailer, MIT). A failure never carries
+ * the recipient, the code, or the SMTP error text, because that text can include the server name or login.
+ */
+export class EmailOtpProvider implements OtpProvider {
+  readonly name = 'email' as const;
+  private readonly opts: EmailOtpOptions;
+
+  constructor(opts: EmailOtpOptions) {
+    this.opts = opts;
+  }
+
+  codeFor(): string {
+    return String(randomInt(0, 1_000_000)).padStart(6, '0');
+  }
+
+  async send(to: string, code: string): Promise<OtpSendResult> {
+    if (!EMAIL_RE.test(to)) return { ok: false, code: 'OTP_SEND_FAILED' };
+    try {
+      await this.opts.transport.sendMail({
+        from: this.opts.from,
+        to,
+        subject: 'Your Food OS sign-in code',
+        text: `Your Food OS sign-in code is ${code}. It expires in 5 minutes. If you did not ask for it, ignore this email.`,
+      });
+    } catch {
+      return { ok: false, code: 'OTP_SEND_FAILED' };
+    }
+    return { ok: true };
+  }
+}
+
+/** Standard SMTP transport. No connection is opened until the first send. */
+export function createSmtpTransport(cfg: SmtpConfig): MailTransport {
+  return nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.port === 465,
+    auth: cfg.user ? { user: cfg.user, pass: cfg.pass ?? '' } : undefined,
+  });
 }
 
 export interface Msg91Options {
@@ -80,22 +152,48 @@ export class DevFixedCodeProvider implements OtpProvider {
   }
 }
 
+function smtpConfigFrom(env: NodeJS.ProcessEnv): SmtpConfig {
+  const host = env.SMTP_HOST;
+  if (!host) throw new Error('SMTP_HOST is required for the email OTP provider');
+  const from = env.SMTP_FROM;
+  if (!from) throw new Error('SMTP_FROM is required for the email OTP provider');
+  const port = Number(env.SMTP_PORT || '587');
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error('SMTP_PORT must be a port number');
+  return { host, port, user: env.SMTP_USER || undefined, pass: env.SMTP_PASS || undefined, from };
+}
+
+function emailProviderFrom(env: NodeJS.ProcessEnv): EmailOtpProvider {
+  const cfg = smtpConfigFrom(env);
+  return new EmailOtpProvider({ transport: createSmtpTransport(cfg), from: cfg.from });
+}
+
+function msg91ProviderFrom(env: NodeJS.ProcessEnv): Msg91OtpProvider {
+  const authKey = env.MSG91_AUTH_KEY;
+  const templateId = env.MSG91_TEMPLATE_ID;
+  if (!authKey || !templateId) {
+    throw new Error('MSG91_AUTH_KEY and MSG91_TEMPLATE_ID are required for the msg91 OTP provider');
+  }
+  return new Msg91OtpProvider({ authKey, templateId });
+}
+
+/**
+ * Chooses the OTP provider from OTP_PROVIDER (email | msg91 | dev).
+ * Unset: dev in development and test; email in production when SMTP_HOST is set; otherwise an error.
+ * MSG91 is never chosen unless OTP_PROVIDER=msg91 is set. The dev provider is refused in production.
+ */
 export function selectOtpProvider(env: NodeJS.ProcessEnv): OtpProvider {
   const production = env.NODE_ENV === 'production';
-  const mode = env.OTP_PROVIDER;
+  const mode = env.OTP_PROVIDER || undefined;
 
   if (mode === 'dev') {
     if (production) throw new Error('OTP_PROVIDER=dev is not allowed in production');
     return new DevFixedCodeProvider();
   }
-  if (mode === 'msg91' || (!mode && production)) {
-    const authKey = env.MSG91_AUTH_KEY;
-    const templateId = env.MSG91_TEMPLATE_ID;
-    if (!authKey || !templateId) {
-      throw new Error('MSG91_AUTH_KEY and MSG91_TEMPLATE_ID are required for the msg91 OTP provider');
-    }
-    return new Msg91OtpProvider({ authKey, templateId });
-  }
-  if (!mode) return new DevFixedCodeProvider();
-  throw new Error(`Unknown OTP_PROVIDER: ${mode}`);
+  if (mode === 'email') return emailProviderFrom(env);
+  if (mode === 'msg91') return msg91ProviderFrom(env);
+  if (mode) throw new Error(`Unknown OTP_PROVIDER: ${mode}`);
+
+  if (!production) return new DevFixedCodeProvider();
+  if (env.SMTP_HOST) return emailProviderFrom(env);
+  throw new Error('No OTP provider configured: set SMTP_HOST and SMTP_FROM, or OTP_PROVIDER');
 }

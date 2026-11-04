@@ -2,7 +2,7 @@ import 'server-only';
 import type { SttProvider, TtsProvider, TranslationProvider } from '../types';
 import { FakeStt, FakeTts, FakeTranslation } from '../fakes';
 import { createDeepgramStt } from './deepgram';
-import { createCartesiaTts } from './cartesia';
+import { createCartesiaTts, cartesiaVoiceIds } from './cartesia';
 import { createSarvamTranslation } from './sarvam';
 
 export interface SpeechProviders {
@@ -22,11 +22,13 @@ export function selectSpeechProviders(
   const stt = present(env.DEEPGRAM_API_KEY)
     ? createDeepgramStt({ apiKey: env.DEEPGRAM_API_KEY })
     : new FakeStt({ text: '' });
+  const voices = cartesiaVoiceIds(env);
   const tts = present(env.CARTESIA_API_KEY)
     ? createCartesiaTts({
         apiKey: env.CARTESIA_API_KEY,
         fetchImpl: deps.fetchImpl,
-        voiceId: present(env.CARTESIA_VOICE_ID) ? env.CARTESIA_VOICE_ID : undefined,
+        voiceId: voices.primary,
+        fallbackVoiceId: voices.fallback,
       })
     : new FakeTts();
   const translation = present(env.SARVAM_API_KEY)

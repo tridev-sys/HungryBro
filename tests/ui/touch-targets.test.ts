@@ -146,7 +146,7 @@ test('the source scan finds the interactive controls it is meant to check', () =
 // excluded), with the number of controls audited in that file. A new control, or a file that
 // gains one, fails this test until it is sized and added here.
 const AUDITED_CONTROLS: Record<string, number> = {
-  'app/auth/login/LoginForm.tsx': 4,
+  'app/auth/login/LoginForm.tsx': 6,
   'app/delivery/_components/DeliveryConsole.tsx': 2,
   'app/delivery/_components/VoiceInput.tsx': 3,
   'app/profile/settings/SettingsForms.tsx': 6,

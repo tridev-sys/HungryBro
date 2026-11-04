@@ -2,13 +2,36 @@
 
 import { useActionState } from 'react';
 import type { LoginState } from '@/lib/auth/login';
-import { sendOtpAction, verifyOtpAction } from './actions';
+import { sendOtpAction, verifyOtpAction, verifyTotpAction } from './actions';
 
 const initial: LoginState = { step: 'phone' };
 
 export function LoginForm() {
   const [sendState, sendAction, sendPending] = useActionState(sendOtpAction, initial);
   const [verifyState, verifyAction, verifyPending] = useActionState(verifyOtpAction, initial);
+  const [totpState, totpAction, totpPending] = useActionState(verifyTotpAction, initial);
+
+  if (verifyState.step === 'totp') {
+    return (
+      <form action={totpAction} className="flex flex-col gap-4">
+        <p className="text-sm text-neutral-600">Enter the 6-digit code from your authenticator app, or a recovery code.</p>
+        <label className="flex flex-col gap-1 text-sm">
+          Authenticator or recovery code
+          <input
+            name="code"
+            inputMode="text"
+            autoComplete="one-time-code"
+            required
+            className="min-h-11 rounded border border-neutral-300 px-3 py-2 text-lg tracking-widest"
+          />
+        </label>
+        {totpState.error && <p role="alert" className="text-sm text-red-700">{totpState.error}</p>}
+        <button type="submit" disabled={totpPending} className="min-h-11 rounded bg-neutral-900 px-4 py-2 text-white">
+          {totpPending ? 'Checking...' : 'Verify and sign in'}
+        </button>
+      </form>
+    );
+  }
 
   if (sendState.step === 'otp' && sendState.phone) {
     return (

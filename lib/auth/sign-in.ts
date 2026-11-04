@@ -15,6 +15,14 @@ export async function lookupUserByPhone(pool: pg.Pool, e164: string): Promise<Si
   });
 }
 
+/** Role lookup for a user already verified by a second factor. */
+export async function lookupUserById(pool: pg.Pool, userId: string): Promise<SignedInUser | null> {
+  return asRole(pool, userId, async (c) => {
+    const { rows } = await c.query<SignedInUser>('SELECT id, role FROM users WHERE id = $1', [userId]);
+    return rows[0] ?? null;
+  });
+}
+
 /** Creates the user after a verified OTP. The database rejects it without a recent verified challenge. */
 export async function createUserAfterOtp(pool: pg.Pool, e164: string): Promise<SignedInUser> {
   return asRole(pool, null, async (c) => {

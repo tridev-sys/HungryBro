@@ -32,7 +32,7 @@ test('correct dev code signs in a new diner with a verifiable session', async ()
   await sendOtpForPhone(pool, dev, phone);
   const r = await completeLogin(pool, phone, '123456');
   expect(r.ok).toBe(true);
-  if (!r.ok) return;
+  if (!r.ok || !('token' in r)) return;
   expect(r.role).toBe('diner');
   expect(await verifySession(r.token)).toEqual({ userId: r.userId, role: 'diner' });
 });
