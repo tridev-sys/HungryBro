@@ -96,6 +96,19 @@ test('cartesia TTS requests the sonic-3 model (sonic-2 is not in the current enu
   expect(JSON.parse(String(init.body))).toMatchObject({ model_id: 'sonic-3' });
 });
 
+test('cartesia TTS sends bearer auth and the current Cartesia-Version on tts/bytes', async () => {
+  const { createCartesiaTts } = await import('@/lib/voice/providers/cartesia');
+  const fetchImpl = vi.fn(async () => new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 }));
+  const tts = createCartesiaTts({ apiKey: 'ct-test-key', voiceId: 'voice-1', fetchImpl: fetchImpl as unknown as typeof fetch });
+  for await (const _chunk of tts.synthesize('two naan', 'en')) { /* drain */ }
+  const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+  const headers = init.headers as Record<string, string>;
+  expect(url).toBe('https://api.cartesia.ai/tts/bytes');
+  expect(headers.Authorization).toBe('Bearer ct-test-key');
+  expect(headers['X-API-Key']).toBeUndefined();
+  expect(headers['Cartesia-Version']).toBe('2026-08-14');
+});
+
 test('cashfree rejects a stale timestamp even with a valid signature (Review Focus 2)', () => {
   const raw = fx('cashfree-payment-success.json');
   const ts = '1700000000';
