@@ -21,12 +21,12 @@ export async function makeUser(pool: pg.Pool, role: string, restaurantId: string
 
 export async function makeRestaurant(
   pool: pg.Pool,
-  o: { lat: number; lng: number; load?: number; rating?: number; floor?: number },
+  o: { lat: number; lng: number; load?: number; rating?: number; floor?: number; prep?: number },
 ): Promise<string> {
   const { rows } = await pool.query(
     `INSERT INTO restaurant_nodes (slug, name, fssai_license_number, gstin, location,
-       operational_floor_margin, active_kds_load, rating_aggregate)
-     VALUES ($1, $1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, $6, $7, $8)
+       operational_floor_margin, active_kds_load, rating_aggregate, prep_time_minutes)
+     VALUES ($1, $1, $2, $3, ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography, $6, $7, $8, $9)
      RETURNING id`,
     [
       `r-${randomUUID().slice(0, 12)}`,
@@ -37,6 +37,7 @@ export async function makeRestaurant(
       o.floor ?? 0.05,
       o.load ?? 0,
       o.rating ?? 0,
+      o.prep ?? 12,
     ],
   );
   return rows[0].id as string;

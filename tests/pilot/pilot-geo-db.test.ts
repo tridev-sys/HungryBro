@@ -59,6 +59,7 @@ describe('runPilotSeed against the per-run test database', () => {
       point: CENTRE,
       radiusM: 6000,
       maxLoad: 0.85,
+      maxPrepMinutes: 15,
       items: [{ query: 'Dal Tadka', servingTarget: 1 }],
       dietaryProfiles: [],
     });

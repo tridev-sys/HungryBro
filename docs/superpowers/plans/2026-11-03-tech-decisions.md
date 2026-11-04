@@ -26,15 +26,15 @@ Source for every row: owner, 2026-11-04. These are binding. Code and plans must 
 | Value | Owner setting | Code constant (file) |
 |---|---|---|
 | Platform take-rate (mesh fee) | Flat 3.5% infrastructure fee on GMV, `0.035` | `MESH_PROTOCOL_FEE_RATE` (`lib/pricing.ts`) |
-| Restaurant tabletop SaaS fee | 499 INR per month per physical outlet | Not in code |
+| Restaurant tabletop SaaS fee | 499 INR per month per physical outlet. DECIDED BY OWNER 2026-11-04 | `OUTLET_SAAS_FEE_INR`, `monthlySaasCharge` (`lib/finance/ledger.ts`); table `outlet_subscriptions` (migration 010) |
 | Statutory GST | 5% non-ITC GST, split 2.5% CGST and 2.5% SGST, `0.05` | `STATUTORY_GST_RATE` (`lib/pricing.ts`); split via `splitGst` (`lib/pricing.ts`) |
-| Delivery logistics | Direct pass-through at cost (about 50 INR baseline 3PL) | Not in code (sandbox dispatch has no price) |
+| Delivery logistics | Direct pass-through at cost (about 50 INR baseline 3PL). DECIDED BY OWNER 2026-11-04 | `DISPATCH_BASELINE_COST_INR` (config default only), `withPassThrough` (`lib/finance/ledger.ts`); table `delivery_pass_through_costs` (migration 010) |
 | Operational floor margin | 5% (`0.05`) minimum kitchen margin | `DEFAULT_FLOOR_MARGIN` (`lib/pricing.ts`); DB default `operational_floor_margin` (`db/migrations/001_init.sql`) |
-| Line backpressure threshold | Maximum 85% (`0.85`) active KDS load to participate in reverse auctions under 30 minutes | `AUCTION_MAX_LOAD` (`lib/auction/engine.ts`, SQL `active_kds_load < $4` in `lib/auction/kitchen-repository.ts`); `BACKPRESSURE_THRESHOLD` (`lib/kds/load.ts`) |
+| Line backpressure threshold | Maximum 85% (`0.85`) active KDS load to participate in reverse auctions under 30 minutes. INCLUSIVE: load exactly 0.85 is eligible, above 0.85 is not. DECIDED BY OWNER 2026-11-04 | `AUCTION_MAX_LOAD` (`lib/auction/engine.ts`, SQL `active_kds_load <= $4` in `lib/auction/kitchen-repository.ts`); KDS warning above 0.85 (`lib/kds/load.ts`) |
 | Reverse auction bid window | 18 seconds | `BID_WINDOW_MS` (`lib/auction/engine.ts`); SQL `INTERVAL '18 seconds'` (`lib/auction/auction-repository.ts`) |
 | Visual identity | Keep the current neutral design system for now | Tailwind neutral palette and `app/theme.css` tokens |
 
-Open point (owner decision): the owner wording "maximum 85%" can be read as inclusive (a kitchen at exactly 0.85 participates). The code and `CLAUDE.md` use strict `< 0.85`. Until the owner decides, the code stays strict.
+Decided (owner, 2026-11-04): the 85% load threshold is INCLUSIVE. A kitchen at exactly 0.85 is eligible; above 0.85 is not. The SaaS fee (499 INR per outlet per month) and the delivery pass-through at cost (about 50 INR baseline) are decided and built into the ledger (see the section 2026-11-04 business logic).
 
 ## Cross-plan rules (added in reconciliation)
 
@@ -168,3 +168,16 @@ These decisions let the build continue while vendor answers and owner items are 
 - The 100 GB data disk is being detached and is not used. No file may depend on `/home/ubuntu/docker/data`. `PGDATA_DIR` is removed. `scripts/ec2-bootstrap.sh` no longer mounts a data disk. `scripts/verify-host.sh` checks the named volume and the root free space instead.
 - Backup scratch space is `backups-scratch/` in the repo on the root disk (git-ignored). `scripts/backup-pg.sh` checks free space before writing and refuses to run with less than 20 GiB free (`MIN_FREE_GIB`, default 20, the owner's rule).
 - Moving Postgres data to another disk later requires a verified backup first, then a restore check on the new location.
+
+## Business logic decisions 2026-11-04 (owner decisions, engineering implementation)
+
+Binding for the business logic build (branch `feat/business-logic`, migration `010_business_ledger.sql`).
+
+- **Load threshold is inclusive.** Eligible when `active_kds_load <= 0.85`. Excluded above 0.85. Applied in `evaluateCounterBids`, `matchKitchenNodes`, and the SQL `active_kds_load <= $4`. The KDS warning stays "above 0.85" (`backpressureWarning`).
+- **Restaurant SaaS fee.** 499 INR per physical outlet per month. Table `outlet_subscriptions` (restaurant_id, outlet_label, monthly_fee_inr NUMERIC(10,2) default 499.00, status active/paused/cancelled, period_start, period_end). RLS: staff read their own restaurant only (`app_current_staff_restaurant_id()`, same pattern as 004 and 008). `food_app` has SELECT only. Writes are by `food_admin` (billing ops). `monthlySaasCharge(outlets)` is pure and rounds half-up with `round2`.
+- **Delivery logistics pass-through.** Table `delivery_pass_through_costs` (restaurant_id, delivery_id unique, provider shadowfax/rapido/dunzo, cost_inr NUMERIC(10,2) >= 0). No DB default cost: the cost is the dispatch adapter's value per order. `DISPATCH_BASELINE_COST_INR = 50` is a config constant only. `withPassThrough(orderTotal, dispatchCost)` adds the cost at cost (no markup), rounded half-up. `food_app` has SELECT only.
+- **30 minute SLA as an eligibility constraint.** A kitchen is eligible only when `prep + transit + buffer <= MAX_SLA_MINUTES`. `MAX_SLA_MINUTES = 30` (owner, "under 30 minutes", configurable). `SLA_BUFFER_MINUTES = 3` (engineering default). Boundary inclusive: 15 + 12 + 3 = 30 is eligible; 16 is not. Applied in the SQL (`restaurant_nodes.prep_time_minutes <= maxPrepMinutes`), in `matchKitchenNodes`, and to each counter bid's `estimatedPrepMinutes` in `evaluateCounterBids`.
+- **Prep time source.** Migration 010 adds `restaurant_nodes.prep_time_minutes INTEGER NOT NULL DEFAULT 12` (1 to 120). It is not granted to `food_app` (ops sets it as `food_admin`). 12 minutes is the existing estimate used by the sandbox kitchens (`lib/auction/sandbox-kitchens.ts`).
+- **Transit source.** No transit time is stored before dispatch. `TRANSIT_ESTIMATE_MINUTES = 12` reuses the existing estimate (the sandbox dispatch ETA in `lib/dispatch/sandbox.ts`). A distance-based transit model is a later change and needs a rule from the owner.
+- **Not wired yet.** The dispatch adapters do not return a cost, so no live code path writes `delivery_pass_through_costs` yet. This is a follow-up, not a gap in the calculation.
+

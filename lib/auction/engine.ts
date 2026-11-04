@@ -1,5 +1,6 @@
 import type pg from 'pg';
 import { quoteBundle } from '@/lib/pricing';
+import { maxPrepMinutes, withinSla } from '@/lib/auction/sla';
 import type { DeliveryIntent, LatLng, StationCategory } from '@/types/food-os';
 
 // Pure matching and ranking for the reverse auction. No I/O.
@@ -21,6 +22,7 @@ export interface KitchenCandidate {
   name: string;
   distanceM: number;
   activeKdsLoad: number;
+  prepMinutes: number;
   ratingAggregate: number;
   floorMargin: number;
   lines: MatchedLine[];
@@ -49,6 +51,7 @@ export interface KitchenSearch {
   point: LatLng;
   radiusM: number;
   maxLoad: number;
+  maxPrepMinutes: number;
   items: Array<{ query: string; servingTarget: number }>;
   dietaryProfiles: string[];
 }
@@ -71,7 +74,8 @@ export function evaluateCounterBids(
   for (const bid of bids) {
     const cand = byId.get(bid.restaurantId);
     if (!cand) continue;
-    if (cand.activeKdsLoad >= AUCTION_MAX_LOAD) continue;
+    if (cand.activeKdsLoad > AUCTION_MAX_LOAD) continue;
+    if (!withinSla(bid.estimatedPrepMinutes)) continue;
     let quote;
     try {
       quote = quoteBundle(
@@ -114,8 +118,10 @@ export async function matchKitchenNodes(
     point: intent.client_coordinates,
     radiusM: TRANSIT_RADIUS_M,
     maxLoad: AUCTION_MAX_LOAD,
+    maxPrepMinutes: maxPrepMinutes(),
     items: intent.items_requested.map((i) => ({ query: i.query, servingTarget: i.serving_target })),
     dietaryProfiles: intent.target_dietary_profiles,
   }, client);
-  return found.filter((c) => c.activeKdsLoad < AUCTION_MAX_LOAD && c.distanceM <= TRANSIT_RADIUS_M);
+  return found.filter((c) =>
+    c.activeKdsLoad <= AUCTION_MAX_LOAD && c.distanceM <= TRANSIT_RADIUS_M && withinSla(c.prepMinutes));
 }

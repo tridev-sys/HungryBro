@@ -3,7 +3,7 @@ import type { DeliveryIntent } from '@/types/food-os';
 
 const line = (base: number, qty = 2) => ({ itemId: `i${base}`, name: 'Biryani', basePrice: base, quantity: qty, station: 'Curry' as const });
 const cand = (id: string, o: Partial<KitchenCandidate> = {}): KitchenCandidate => ({
-  restaurantId: id, name: id, distanceM: 1400, activeKdsLoad: 0.42, ratingAggregate: 4.7, floorMargin: 0.05,
+  restaurantId: id, name: id, distanceM: 1400, activeKdsLoad: 0.42, prepMinutes: 12, ratingAggregate: 4.7, floorMargin: 0.05,
   lines: [line(350, 2)], ...o,
 });
 const bid = (id: string, offered: number, prep = 12, base = 350): CounterBid => ({
@@ -17,9 +17,24 @@ test('ranks passing bids by price ascending and reports the mesh fee split', () 
   expect(out[0]).toMatchObject({ offeredPriceInr: 710, meshFee: 24.85, kitchenNet: 685.15 });
 });
 
-test('excludes kitchens at load 0.85 or above (strict), even if they bid (Review Focus 2)', () => {
-  const cands = [cand('BUSY', { activeKdsLoad: 0.85 })];
+test('includes a kitchen at load exactly 0.85 (inclusive threshold, owner 2026-11-04)', () => {
+  const cands = [cand('AT85', { activeKdsLoad: 0.85 })];
+  expect(evaluateCounterBids(cands, [bid('AT85', 690)], 800).map((b) => b.restaurantId)).toEqual(['AT85']);
+});
+
+test('excludes kitchens with load above 0.85, even if they bid', () => {
+  const cands = [cand('BUSY', { activeKdsLoad: 0.86 })];
   expect(evaluateCounterBids(cands, [bid('BUSY', 690)], 800)).toEqual([]);
+});
+
+test('excludes a bid whose prep plus transit plus buffer exceeds 30 minutes (16 + 12 + 3)', () => {
+  const cands = [cand('SLOW')];
+  expect(evaluateCounterBids(cands, [bid('SLOW', 690, 16)], 800)).toEqual([]);
+});
+
+test('includes a bid exactly at the 30 minute SLA (15 + 12 + 3)', () => {
+  const cands = [cand('EDGE')];
+  expect(evaluateCounterBids(cands, [bid('EDGE', 690, 15)], 800).map((b) => b.restaurantId)).toEqual(['EDGE']);
 });
 
 test('excludes bids above the budget ceiling', () => {
@@ -49,4 +64,16 @@ test('matchKitchenNodes re-applies the load cutoff to repository results', async
   const repo: KitchenRepository = { findCandidates: async () => [cand('OK'), cand('BUSY', { activeKdsLoad: 0.9 })] };
   const out = await matchKitchenNodes(repo, intent);
   expect(out.map((c) => c.restaurantId)).toEqual(['OK']);
+});
+
+test('matchKitchenNodes applies the 30 minute SLA filter and the inclusive 0.85 load cutoff', async () => {
+  const intent = { modality: 'DELIVERY', budget_ceiling_inr: 800, sla_max_minutes: 30, headcount: 3,
+    target_dietary_profiles: [], items_requested: [{ query: 'biryani', serving_target: 2 }],
+    client_coordinates: { lat: 12.9716, lng: 77.6412 } } as DeliveryIntent;
+  const repo: KitchenRepository = { findCandidates: async () => [
+    cand('EDGE', { activeKdsLoad: 0.85, prepMinutes: 15 }),
+    cand('LATE', { prepMinutes: 16 }),
+  ] };
+  const out = await matchKitchenNodes(repo, intent);
+  expect(out.map((c) => c.restaurantId)).toEqual(['EDGE']);
 });
