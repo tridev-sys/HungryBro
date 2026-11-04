@@ -70,3 +70,54 @@ describe('DeliveryConsole coordinate inputs', () => {
     expect(screen.queryByText(/must be between/)).toBeNull();
   });
 });
+
+describe('DeliveryConsole live location', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const setGeo = (geo: unknown) =>
+    Object.defineProperty(navigator, 'geolocation', { value: geo, configurable: true });
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => ({
+      status: 500,
+      json: async () => ({ error: 'Request failed' }),
+      headers: { get: () => null },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Object.defineProperty(navigator, 'geolocation', { value: undefined, configurable: true });
+  });
+
+  it('asks the browser for the live position when the screen opens and shows a denial with manual entry', async () => {
+    const getCurrentPosition = vi.fn((_ok: PositionCallback, err: PositionErrorCallback) => err({ code: 1 } as GeolocationPositionError));
+    setGeo({ getCurrentPosition });
+    render(<DeliveryConsole />);
+    expect(await screen.findByText(/Location access was denied/)).toHaveAttribute('role', 'status');
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Latitude')).toBeEnabled();
+  });
+
+  it('sends the browser coordinates when location is granted and the user typed none', async () => {
+    setGeo({
+      getCurrentPosition: (ok: PositionCallback) => ok({ coords: { latitude: 12.9, longitude: 77.6 } } as GeolocationPosition),
+    });
+    render(<DeliveryConsole />);
+    await waitFor(() => expect(screen.getByText(/Using your current location/)).toBeVisible());
+    fireEvent.change(screen.getByPlaceholderText(/Dinner for 3/), { target: { value: SAMPLE } });
+    fireEvent.click(screen.getByRole('button', { name: 'Find kitchens' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.intent.client_coordinates).toEqual({ lat: 12.9, lng: 77.6 });
+  });
+
+  it('does not send a locality centroid when location is unavailable and no coordinates are typed', async () => {
+    setGeo(undefined);
+    render(<DeliveryConsole />);
+    fireEvent.change(screen.getByPlaceholderText(/Dinner for 3/), { target: { value: SAMPLE } });
+    fireEvent.click(screen.getByRole('button', { name: 'Find kitchens' }));
+    expect(await screen.findByText(/Enter your latitude and longitude/)).toHaveAttribute('role', 'alert');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

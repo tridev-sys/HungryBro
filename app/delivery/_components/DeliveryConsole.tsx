@@ -7,6 +7,15 @@ import CounterBidList, { type BidRow } from './CounterBidList';
 import DispatchPanel, { type DispatchInfo } from './DispatchPanel';
 import { extractIntentStub, type ExtractedIntent } from '@/lib/delivery/stub-extract';
 import { LatLngSchema, type LatLng } from '@/types/food-os';
+import { requestBrowserLocation, type LocationState } from '@/lib/location/browser-location';
+
+// Status line under the coordinate fields. The alert on submit carries the instruction.
+const LOCATION_STATUS: Record<Exclude<LocationState['status'], 'located'>, string> = {
+  requesting: 'Finding your location...',
+  denied: 'Location access was denied. Enter your coordinates below.',
+  unavailable: 'Your location is unavailable. Enter your coordinates below.',
+  timeout: 'Locating you timed out. Enter your coordinates below.',
+};
 
 // Same bounds as DeliveryIntentSchema.client_coordinates (LatLngSchema), so the console rejects
 // exactly what the API would reject with 400.
@@ -49,6 +58,18 @@ export default function DeliveryConsole() {
   const [latText, setLatText] = useState('');
   const [lngText, setLngText] = useState('');
   const [coordErrors, setCoordErrors] = useState<Partial<Record<CoordField, string>>>({});
+  const [location, setLocation] = useState<LocationState>({ status: 'requesting' });
+
+  // Live position when the screen opens. Nothing is hardcoded: a denial or timeout leaves manual entry.
+  useEffect(() => {
+    let alive = true;
+    requestBrowserLocation(navigator.geolocation).then((state) => {
+      if (alive) setLocation(state);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // Live updates over SSE for the open auction.
   useEffect(() => {
@@ -106,19 +127,21 @@ export default function DeliveryConsole() {
       return;
     }
 
-    // Typed coordinates win when both are given; one without the other is incomplete.
+    // Typed coordinates win when both are given; otherwise the diner's live browser position.
+    // A locality named in the text never supplies coordinates: only the diner's own fix or input is sent.
     const latTrim = latText.trim();
     const lngTrim = lngText.trim();
     const partial = (latTrim === '') !== (lngTrim === '');
     const typed: LatLng | undefined = latTrim && lngTrim ? { lat: Number(latTrim), lng: Number(lngTrim) } : undefined;
-    const coords = typed ?? parsed.client_coordinates;
+    const live: LatLng | undefined = location.status === 'located' ? { lat: location.lat, lng: location.lng } : undefined;
+    const coords = typed ?? live;
     setExtracted({ ...parsed, client_coordinates: coords });
     if (partial) {
-      setError('Enter both latitude and longitude, or leave both blank to use a locality.');
+      setError('Enter both latitude and longitude, or leave both blank to use your location.');
       return;
     }
     if (!coords) {
-      setError('Pick a pilot locality (Indiranagar or HSR), or enter coordinates.');
+      setError('Enter your latitude and longitude below, or allow location access.');
       return;
     }
     if (parsed.items_requested.length === 0) {
@@ -171,8 +194,16 @@ export default function DeliveryConsole() {
       <VoiceInput value={text} onChange={setText} onSubmit={submit} disabled={busy} />
       <fieldset className="grid grid-cols-2 gap-3 text-sm">
         <legend className="col-span-2 text-[var(--color-text-muted)]">
-          Coordinates (optional, leave blank to use the locality)
+          Coordinates (optional, leave blank to use your live location)
         </legend>
+        {location.status !== 'located' && (
+          <p role="status" className="col-span-2 text-[var(--color-text-muted)]">
+            {LOCATION_STATUS[location.status]}
+          </p>
+        )}
+        {location.status === 'located' && (
+          <p role="status" className="col-span-2 text-[var(--color-text-muted)]">Using your current location.</p>
+        )}
         <div className="space-y-1">
           <label htmlFor="delivery-latitude" className="block text-[var(--color-text-muted)]">Latitude</label>
           <input
