@@ -30,3 +30,19 @@ export async function createUserAfterOtp(pool: pg.Pool, e164: string): Promise<S
     return rows[0];
   });
 }
+
+/** Read-only sign-in lookup by normalised email. Never creates a user. */
+export async function lookupUserByEmail(pool: pg.Pool, email: string): Promise<SignedInUser | null> {
+  return asRole(pool, null, async (c) => {
+    const { rows } = await c.query<SignedInUser>('SELECT id, role FROM app_lookup_user_by_email($1)', [email]);
+    return rows[0] ?? null;
+  });
+}
+
+/** Creates the user after a verified email OTP. The database rejects it without a recent verified challenge. */
+export async function createUserAfterEmailOtp(pool: pg.Pool, email: string): Promise<SignedInUser> {
+  return asRole(pool, null, async (c) => {
+    const { rows } = await c.query<SignedInUser>('SELECT id, role FROM app_create_user_after_email_otp($1)', [email]);
+    return rows[0];
+  });
+}

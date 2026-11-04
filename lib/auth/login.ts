@@ -2,30 +2,52 @@ import type pg from 'pg';
 import type { UserRole } from '@/types/food-os';
 import { requestOtp, verifyOtp } from './otp';
 import type { OtpProvider } from './otp-providers';
-import { lookupUserByPhone, lookupUserById, createUserAfterOtp } from './sign-in';
+import { lookupUserByPhone, lookupUserByEmail, lookupUserById, createUserAfterOtp, createUserAfterEmailOtp } from './sign-in';
 import { issueSession, readPendingSecondFactor, issuePendingSecondFactor } from './session';
 import { isTotpEnabled, verifySecondFactor } from './totp';
 
 // No next/* imports here, so the logic runs in Node tests.
 
-export type LoginState = { step: 'phone' | 'otp' | 'totp'; phone?: string; error?: string };
+export type LoginState = { step: 'phone' | 'otp' | 'totp'; phone?: string; email?: string; error?: string };
 
-const REQUEST_ERRORS: Record<'INVALID_PHONE' | 'RATE_LIMITED' | 'SEND_FAILED', string> = {
-  INVALID_PHONE: 'Enter a valid 10-digit Indian mobile number.',
+const INVALID_IDENTIFIER = 'Enter a valid 10-digit Indian mobile number or email address.';
+
+const REQUEST_ERRORS: Record<'INVALID_PHONE' | 'INVALID_EMAIL' | 'RATE_LIMITED' | 'SEND_FAILED', string> = {
+  INVALID_PHONE: INVALID_IDENTIFIER,
+  INVALID_EMAIL: INVALID_IDENTIFIER,
   RATE_LIMITED: 'Too many codes requested for this number. Try again in an hour.',
   SEND_FAILED: 'We could not send the code to this number. Please try again.',
 };
 
-const VERIFY_ERRORS: Record<'INVALID_PHONE' | 'WRONG_CODE' | 'EXPIRED_OR_LOCKED', string> = {
-  INVALID_PHONE: 'Enter a valid 10-digit Indian mobile number.',
+const VERIFY_ERRORS: Record<'INVALID_PHONE' | 'INVALID_EMAIL' | 'WRONG_CODE' | 'EXPIRED_OR_LOCKED', string> = {
+  INVALID_PHONE: INVALID_IDENTIFIER,
+  INVALID_EMAIL: INVALID_IDENTIFIER,
   WRONG_CODE: 'That code is not right.',
   EXPIRED_OR_LOCKED: 'This code has expired or too many attempts were made. Request a new code.',
 };
 
-export async function sendOtpForPhone(pool: pg.Pool, provider: OtpProvider, rawPhone: string): Promise<LoginState> {
-  const r = await requestOtp(pool, provider, rawPhone);
-  if (!r.ok) return { step: 'phone', error: REQUEST_ERRORS[r.reason] };
-  return { step: 'otp', phone: r.e164 };
+/** Step 1 of sign-in: a phone number or an email address. The result carries whichever was used. */
+export async function sendOtpForIdentifier(pool: pg.Pool, provider: OtpProvider, rawIdentifier: string): Promise<LoginState> {
+  const r = await requestOtp(pool, provider, rawIdentifier);
+  if (!r.ok) {
+    const isEmail = rawIdentifier.includes('@');
+    const error = r.reason === 'SEND_FAILED' && isEmail
+      ? 'We could not send the code to this email address. Please try again.'
+      : r.reason === 'RATE_LIMITED' && isEmail
+        ? 'Too many codes requested for this email address. Try again in an hour.'
+        : REQUEST_ERRORS[r.reason];
+    return { step: 'phone', error };
+  }
+  return 'email' in r ? { step: 'otp', email: r.email } : { step: 'otp', phone: r.e164 };
+}
+
+/** The OTP step's state for the identifier the person typed (used when a code check fails). */
+export function otpStepFor(rawIdentifier: string, error?: string): LoginState {
+  const state: LoginState = { step: 'otp' };
+  if (rawIdentifier.includes('@')) state.email = rawIdentifier.trim().toLowerCase();
+  else state.phone = rawIdentifier.trim();
+  if (error) state.error = error;
+  return state;
 }
 
 const TOTP_ERROR = 'That code is not right.';
@@ -37,18 +59,20 @@ export type CompleteLoginResult =
   | { ok: false; error: string };
 
 /**
- * Step 1: the email/phone code. Users with 2FA enabled get a pending token instead of a session;
+ * Step 1: the phone or email code. Users with 2FA enabled get a pending token instead of a session;
  * they must then call completeTotpLogin with an authenticator or recovery code.
  */
 export async function completeLogin(
   pool: pg.Pool,
-  rawPhone: string,
+  rawIdentifier: string,
   code: string,
 ): Promise<CompleteLoginResult> {
-  const v = await verifyOtp(pool, rawPhone, code);
+  const v = await verifyOtp(pool, rawIdentifier, code);
   if (!v.ok) return { ok: false, error: VERIFY_ERRORS[v.reason] };
 
-  const user = (await lookupUserByPhone(pool, v.e164)) ?? (await createUserAfterOtp(pool, v.e164));
+  const user = 'email' in v
+    ? (await lookupUserByEmail(pool, v.email)) ?? (await createUserAfterEmailOtp(pool, v.email))
+    : (await lookupUserByPhone(pool, v.e164)) ?? (await createUserAfterOtp(pool, v.e164));
   if (await isTotpEnabled(pool, user.id)) {
     return { ok: true, totpRequired: true, pendingToken: await issuePendingSecondFactor(user.id), userId: user.id };
   }

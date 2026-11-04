@@ -33,11 +33,12 @@ export function LoginForm() {
     );
   }
 
-  if (sendState.step === 'otp' && sendState.phone) {
+  const sentTo = sendState.phone ?? sendState.email;
+  if (sendState.step === 'otp' && sentTo) {
     return (
       <form action={verifyAction} className="flex flex-col gap-4">
-        <p className="text-sm text-neutral-600">Enter the 6-digit code sent to {sendState.phone}.</p>
-        <input type="hidden" name="phone" value={sendState.phone} />
+        <p className="text-sm text-neutral-600">Enter the 6-digit code sent to {sentTo}.</p>
+        <input type="hidden" name="identifier" value={sentTo} />
         <label className="flex flex-col gap-1 text-sm">
           Code
           <input
@@ -61,12 +62,13 @@ export function LoginForm() {
   return (
     <form action={sendAction} className="flex flex-col gap-4">
       <label className="flex flex-col gap-1 text-sm">
-        Mobile number (+91)
+        Mobile number (+91) or email
         <input
-          name="phone"
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel-national"
+          name="identifier"
+          type="text"
+          inputMode="email"
+          autoComplete="username"
+          spellCheck={false}
           required
           className="min-h-11 rounded border border-neutral-300 px-3 py-2 text-lg"
         />

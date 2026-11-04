@@ -4,21 +4,21 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getPool } from '@/lib/db/client';
 import { selectOtpProvider } from '@/lib/auth/otp-providers';
-import { sendOtpForPhone, completeLogin, completeTotpLogin, type LoginState } from '@/lib/auth/login';
+import { sendOtpForIdentifier, otpStepFor, completeLogin, completeTotpLogin, type LoginState } from '@/lib/auth/login';
 import {
   SESSION_COOKIE, sessionCookieOptions, TOTP_PENDING_COOKIE, TOTP_PENDING_SECONDS,
 } from '@/lib/auth/session';
 
 export async function sendOtpAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
-  const phone = String(formData.get('phone') ?? '');
-  return sendOtpForPhone(await getPool(), selectOtpProvider(process.env), phone);
+  const identifier = String(formData.get('identifier') ?? '');
+  return sendOtpForIdentifier(await getPool(), selectOtpProvider(process.env), identifier);
 }
 
 export async function verifyOtpAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
-  const phone = String(formData.get('phone') ?? '');
+  const identifier = String(formData.get('identifier') ?? '');
   const code = String(formData.get('code') ?? '');
-  const result = await completeLogin(await getPool(), phone, code);
-  if (!result.ok) return { step: 'otp', phone, error: result.error };
+  const result = await completeLogin(await getPool(), identifier, code);
+  if (!result.ok) return otpStepFor(identifier, result.error);
 
   const jar = await cookies();
   if ('totpRequired' in result) {
