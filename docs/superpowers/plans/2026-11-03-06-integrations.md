@@ -1853,3 +1853,10 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - Printer host and station-to-printer mapping are not in the Plan 01 schema. The convention in this plan is `pos_credentials.printers[]`; Plan 03 owns the UI for it.
 - Cashfree's customer phone in create calls is a placeholder; Plan 05 must supply the verified diner phone.
 - Live ONDC send, live 3PL dispatch, and live payment settlement are disabled by configuration until onboarding.
+
+## Addendum: POS provider allow-list (2026-11-04)
+
+- `POS_PROVIDERS_ENABLED` (comma-separated provider names) gates POS traffic. Unset or empty means no POS provider is enabled.
+- Webhook `POST /api/pos/[provider]/[restaurantId]` returns `404 not_found` for a provider not in the list, before the body is read, the signature is checked, or the database is touched.
+- The nightly sync skips providers not in the list and reports them in `skipped` with reason `provider_not_enabled`. Their credentials are not decrypted.
+- Parsing is pure (`lib/pos/allowlist.ts`). Test suites set the list in `tests/setup/pos-key.ts`; production keeps it empty until the owner approves a provider.

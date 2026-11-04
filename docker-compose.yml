@@ -104,6 +104,7 @@ services:
       # db/bootstrap/002_app_login.sql. Row-level security applies to this role.
       APP_DATABASE_URL: postgres://food_app_login:${APP_DB_PASSWORD:?set APP_DB_PASSWORD}@db:5432/food_os
       REDIS_URL: redis://redis:6379
+      POS_PROVIDERS_ENABLED: ${POS_PROVIDERS_ENABLED:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

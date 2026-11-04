@@ -55,6 +55,35 @@ test('an empty provider menu fails that restaurant and writes nothing (Review Fo
   expect(after.rows[0].n).toBe(before.rows[0].n);
 });
 
+test('providers not in the allow-list are skipped with a reason and never fetched or written', async () => {
+  const allowed = await createRestaurant(owner, { provider: 'petpooja', credentials: { api_base_url: 'https://al-allowed.test', api_key: 'k' } });
+  const blocked = await createRestaurant(owner, { provider: 'urbanpiper', credentials: { api_base_url: 'https://al-blocked.test', api_key: 'k' } });
+  const fetched: string[] = [];
+  const fetcher = httpMenuFetcher({ fetchImpl: (async (url: string) => { fetched.push(String(url)); return new Response(menu); }) as unknown as typeof fetch });
+  const summary = await runNightlyMenuSync(pool, fetcher, new Set(['petpooja']));
+  expect(fetched.some((u) => u.includes('al-blocked.test'))).toBe(false);
+  expect(fetched.some((u) => u.startsWith('https://al-allowed.test/menu'))).toBe(true);
+  expect(summary.skipped).toContainEqual({ restaurantId: blocked, provider: 'urbanpiper', reason: 'provider_not_enabled' });
+  expect(summary.skipped.map((s) => s.restaurantId)).not.toContain(allowed);
+  expect(summary.failed.map((f) => f.restaurantId)).not.toContain(blocked);
+  const { rows } = await pool.query('SELECT count(*)::int AS n FROM menu_items WHERE restaurant_id = $1', [blocked]);
+  expect(rows[0].n).toBe(0);
+});
+
+test('with POS_PROVIDERS_ENABLED unset, the default sync skips every POS provider', async () => {
+  const saved = process.env.POS_PROVIDERS_ENABLED;
+  delete process.env.POS_PROVIDERS_ENABLED;
+  try {
+    const r = await createRestaurant(owner, { provider: 'petpooja', credentials: { api_base_url: 'https://al-default.test', api_key: 'k' } });
+    const fetched: string[] = [];
+    const summary = await runNightlyMenuSync(pool, httpMenuFetcher({ fetchImpl: (async (url: string) => { fetched.push(String(url)); return new Response(menu); }) as unknown as typeof fetch }));
+    expect(fetched.some((u) => u.includes('al-default.test'))).toBe(false);
+    expect(summary.skipped.map((s) => s.restaurantId)).toContain(r);
+  } finally {
+    if (saved !== undefined) process.env.POS_PROVIDERS_ENABLED = saved;
+  }
+});
+
 test('the sync runs as food_sync (BYPASSRLS) and refuses any other role (Decision 2)', async () => {
   const { rows } = await pool.query(
     `SELECT current_user AS u, (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'food_sync') AS bypass`);
