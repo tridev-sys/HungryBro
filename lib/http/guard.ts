@@ -57,8 +57,32 @@ export interface ApiGuardOptions {
 }
 
 /**
+ * Upper bound on the rate-limit store call. ioredis already fails a dead Redis in about 1 s per
+ * attempt; this makes the answer arrive within this bound whatever the store is doing.
+ */
+export const RATE_LIMIT_DEADLINE_MS = 1500;
+
+/**
+ * Policy: fail closed. When the store cannot answer in time, the request is refused with 503 and
+ * the handler does not run. This matches the pre-existing effect (a store error stopped the
+ * request) but makes it a bounded, stable response. Plan 07 does not specify store failure, so
+ * this follows the rate limiter's purpose: an unmetered request must not reach the handler.
+ */
+const storeUnavailable = () =>
+  Response.json({ error: 'rate limit store unavailable', code: 'RATE_LIMIT_UNAVAILABLE' }, { status: 503 });
+
+function withDeadline<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('rate limit deadline exceeded')), ms);
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+
+/**
  * Wraps an /api route handler. Order: declared-length check, rate limit, handler.
- * Every response gets SECURITY_HEADERS. PayloadTooLargeError maps to 413.
+ * Every response gets SECURITY_HEADERS. PayloadTooLargeError maps to 413. A rate-limit store
+ * that fails or misses RATE_LIMIT_DEADLINE_MS maps to 503 RATE_LIMIT_UNAVAILABLE.
  */
 export function withApiGuards<H extends (req: Request, ctx: never) => Promise<Response>>(
   handler: H,
@@ -67,7 +91,16 @@ export function withApiGuards<H extends (req: Request, ctx: never) => Promise<Re
   const wrapped = async (req: Request, ctx?: unknown): Promise<Response> => {
     try {
       enforceDeclaredLength(req.headers);
-      const limited = await guardRateLimit(req, opts.store ?? defaultStore(), opts.sessionToken?.(req) ?? null);
+      const sessionToken = opts.sessionToken?.(req) ?? null;
+      let limited: Response | null;
+      try {
+        limited = await withDeadline(
+          guardRateLimit(req, opts.store ?? defaultStore(), sessionToken),
+          RATE_LIMIT_DEADLINE_MS,
+        );
+      } catch {
+        return withSecurityHeaders(storeUnavailable());
+      }
       if (limited) return withSecurityHeaders(limited);
       return withSecurityHeaders(await handler(req, ctx as never));
     } catch (err) {
