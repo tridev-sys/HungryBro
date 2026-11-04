@@ -2,6 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Decision 2026-11-04 (owner, binding): edge and TLS.** Cloudflare proxy is ON for `hungrybro.pacewisdom.in`. Cloudflare SSL/TLS mode is Full (strict). The origin uses a Cloudflare Origin CA certificate installed on the server, and Caddy serves it from files (`tls` with the origin certificate and key). Caddy does not use Let's Encrypt HTTP challenges for this domain. The Elastic IP is the owner-provided value (kept out of the repo by the no-hardcoded-IP rule). Every "Let's Encrypt", "automatic TLS", `ACME_EMAIL`, and `caddy_data` certificate statement below is superseded by this decision and is kept only as history. Certificate and key files are secrets: they live on the host outside the repo, and their contents are never written to a plan, a log, or git. The deploy runbook is a separate branch's work and is not restated here.
+>
+> Engineering consequences (recorded, to be applied when Plan 07 is built): the Caddy site block for `hungrybro.pacewisdom.in` loads the origin certificate files; the client IP comes from `CF-Connecting-IP` (only from Cloudflare's published ranges), replacing the earlier `X-Real-IP` contract, which the decision in the Scope section below already anticipates; UFW keeps 22, 80, and 443. Restricting 443 to Cloudflare's IP ranges is an optional hardening step, not required by this decision.
+
 **Goal:** Put the app behind the shared Caddy proxy (`proxy_server/`, container `proxy-caddy`) with Let's Encrypt TLS on one `c7i.xlarge` EC2 instance in `ap-south-1`, add in-app token-bucket rate limiting, security headers and body limits, nightly backups with a monthly restore test, a CI build-and-deploy pipeline with rollback, idempotent seed data for Indiranagar and HSR, and Playwright end-to-end tests for dine-in isolation and multi-merchant delivery auctions.
 
 **Architecture:** Plan 01's `Dockerfile` and `docker-compose.yml` stay the base. This plan adds `docker-compose.prod.yml` as an override (ports removed, CPU and memory caps, networks, EBS bind mount, logging) and a `deploy/` directory (systemd units, S3 lifecycle, deploy script). The shared Caddy proxy is a separate stack in `proxy_server/` (its own compose file and Caddyfile) that joins the external `shared` network; it is the only service that publishes host ports. Rate limiting and HTTP guards live in `lib/ratelimit/` and `lib/http/` and run on the Node runtime inside route handlers. Operational scripts live in `scripts/`. Shell tests live in `scripts/tests/`.
@@ -15,7 +19,7 @@
 In:
 - (a) Token-bucket rate limiter: pure function plus Redis-backed store, per-IP and per-session keys, tested with a fake clock.
 - (b) Security headers and a 64 KiB body limit on API routes.
-- (c) Shared Caddy proxy (`proxy_server/`, container `proxy-caddy`) with automatic Let's Encrypt TLS; the app is reachable only over the external `shared` network.
+- (c) Shared Caddy proxy (`proxy_server/`, container `proxy-caddy`) with TLS from the Cloudflare Origin CA certificate files (decision 2026-11-04; the earlier automatic Let's Encrypt wording is superseded); the app is reachable only over the external `shared` network.
 - (d) Per-container memory limits matching the tech-decision budget; Redis `maxmemory 256mb` with `allkeys-lru`.
 - (e) Backups: `pg_dump` to S3 with 14-day retention, systemd timers, restore script that loads into a scratch database and checks row counts against a manifest; monthly restore test.
 - (f) GitHub Actions: test, build, push to GHCR, SSH deploy by immutable `sha-` tag, health check, rollback to the previous tag on failure.
@@ -26,7 +30,7 @@ In:
 - (k) Capacitor wrapper: documented as a later step at the end of this plan, not built here.
 
 Out:
-- Cloudflare WAF rules. Tech decisions say the WAF is added once there is a domain and the app does not depend on it. This plan records the hook point (the `X-Real-IP` contract) and nothing more.
+- Cloudflare WAF rules. Tech decisions say the WAF is added once there is a domain and the app does not depend on it. This plan records the hook point (the `X-Real-IP` contract) and nothing more. Decision 2026-11-04 turns the Cloudflare proxy on (see the note at the top); WAF rule configuration is still not part of this plan.
 - Auction engine, dine-in routes, and KDS UI. Plans 02 and 03 build them. The E2E specs in this plan consume their contracts (see Interfaces).
 - OTP-specific rate limits. Plan 05 reuses `consumeToken` with its own limits.
 - Native app builds (Capacitor). Later step.
@@ -46,7 +50,7 @@ Out:
   - `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`
   - `Permissions-Policy: microphone=(self), camera=(), geolocation=(self)`
   - Nonce-based CSP is deferred; `unsafe-inline` is the documented trade-off until then.
-- Client IP: Caddy overwrites `X-Real-IP` with the TCP peer address. The app reads `X-Real-IP` first and falls back to the rightmost `X-Forwarded-For` entry. It never trusts the leftmost entry. When Cloudflare is added, Caddy switches to `CF-Connecting-IP` in one place.
+- Client IP (decision 2026-11-04: with the Cloudflare proxy ON, the source moves to `CF-Connecting-IP`, see the top note and Unresolved Gap 7): Caddy overwrites `X-Real-IP` with the TCP peer address. The app reads `X-Real-IP` first and falls back to the rightmost `X-Forwarded-For` entry. It never trusts the leftmost entry. When Cloudflare is added, Caddy switches to `CF-Connecting-IP` in one place.
 - Production ports: only `proxy-caddy` (the shared proxy) publishes host ports, exactly `80` and `443`. `app`, `db`, and `redis` publish none in the prod override. `app` is on networks `shared` (external) and `backend`; `db` and `redis` are on `backend` only. Caddy obtains and renews Let's Encrypt certificates for `DOMAIN` automatically, using `ACME_EMAIL`; HTTP redirects to HTTPS.
 - Resource limits and volumes (tech decisions, binding): every service sets `cpus`, `mem_limit`, `mem_reservation`, `pids_limit`, a json-file log cap (`max-size` 10m, `max-file` 3), and `restart: unless-stopped`. Postgres data is the named volume `food-os-pgdata` on the root disk (storage decision 2026-11-04; supersedes the data-disk bind mount described below). Named volumes carry fixed names and labels (`food-os-redisdata`, `proxy-caddy-data`). Volumes are never removed by `docker compose down`.
 - Hardware (tech decisions, decision 4): `c7i.xlarge` (4 vCPU, 8 GiB RAM) in `ap-south-1`, Ubuntu LTS. Not c4 and not t3. EBS gp3 for all volumes: root volume 60 GiB; no data disk (storage decision 2026-11-04). At least 20 GiB kept free on the root volume for `pg_dump` scratch in `/home/ubuntu/docker/backups-scratch`.
@@ -505,9 +509,9 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: Plan 01 `docker-compose.yml` (`app`, `db`, `redis`, `pgdata`, `redisdata`, the `backend` and external `shared` networks, healthchecks); `proxy_server/create-shared-network.sh` (creates `shared`); `IMAGE_TAG`, `GHCR_OWNER`, `POSTGRES_PASSWORD` env (set in `/home/ubuntu/docker/.env`); `DOMAIN` and `ACME_EMAIL` env (set in the proxy's `.env`).
 - Produces:
-  - `proxy_server/Caddyfile`: global block `{ email {$ACME_EMAIL} }`; one site block for `{$DOMAIN}` with `encode zstd gzip`, `header { -Server }`, `reverse_proxy food-os-app:3000` with `header_up X-Real-IP {remote_host}`, and access logs to stdout. Automatic Let's Encrypt TLS and the HTTP-to-HTTPS redirect come from Caddy's defaults. Adding an app means adding one site block.
+  - `proxy_server/Caddyfile`: global block `{ email {$ACME_EMAIL} }`; one site block for `{$DOMAIN}` with `encode zstd gzip`, `header { -Server }`, `reverse_proxy food-os-app:3000` with `header_up X-Real-IP {remote_host}`, and access logs to stdout. Decision 2026-11-04: the site block is `hungrybro.pacewisdom.in` (the `{$DOMAIN}` placeholder resolves to it) and uses `tls <origin-cert-file> <origin-key-file>` (Cloudflare Origin CA files mounted read-only, paths not written here) in place of automatic Let's Encrypt; the global `email` block for ACME is not needed and is superseded. The HTTP-to-HTTPS redirect still comes from Caddy's defaults. Adding an app means adding one site block.
   - `proxy_server/docker-compose.yml` (run from `proxy_server/`): service `caddy`, `container_name: proxy-caddy`, `image: caddy:2-alpine`, `ports: ["80:80", "443:443"]`, mounts `./Caddyfile:/etc/caddy/Caddyfile:ro` and the named volumes `caddy_data` and `caddy_config`, env `DOMAIN` and `ACME_EMAIL` (both required via `${...:?}`), `restart: unless-stopped`, `networks: [shared]`, caps `cpus: 0.5`, `mem_limit: 128m`, `mem_reservation: 64m`, `pids_limit: 128` (tech decisions require both keys but give no Caddy values; these two are proposed), json-file log cap (`max-size` 10m, `max-file` 3). Top level: `networks: { shared: { external: true } }`.
-    - Volume `caddy_data`: `name: proxy-caddy-data`, labels `app: food-os`, `purpose: tls-certificates`. It holds Let's Encrypt certificates and ACME account keys; losing it forces re-issuance, so it is part of the backup set (backup mechanism to be confirmed; see Unresolved Gaps). `caddy_config` is labelled `purpose: caddy-config`.
+    - Volume `caddy_data`: `name: proxy-caddy-data`, labels `app: food-os`, `purpose: tls-certificates`. Decision 2026-11-04: TLS comes from the Cloudflare Origin CA files, so this volume no longer holds the certificates that matter for TLS; Caddy may still create its own state here. The volume stays in the backup set until the owner decides otherwise (backup mechanism to be confirmed; see Unresolved Gaps). The Let's Encrypt wording below is historical. (backup mechanism to be confirmed; see Unresolved Gaps). `caddy_config` is labelled `purpose: caddy-config`.
   - `docker-compose.prod.yml` override (run as `docker compose -f docker-compose.yml -f docker-compose.prod.yml`):
     - `app`: `image: ghcr.io/${GHCR_OWNER}/food-os:${IMAGE_TAG:?}`, `build: !reset null`, `ports: !reset []`, `expose: ["3000"]`, `cpus: 1.5`, `mem_limit: 1g`, `mem_reservation: 512m`, `pids_limit: 512`, `networks: [shared, backend]`, `restart: unless-stopped`.
     - `db`: `ports: !reset []` (the base's `127.0.0.1:5432` binding is removed; prod publishes nothing), `volumes: !override ["pgdata:/var/lib/postgresql/data"]` (named volume `food-os-pgdata` on the root disk, declared in the prod file with the base's name and labels; storage decision 2026-11-04), `cpus: 2.0`, `mem_limit: 2g`, `mem_reservation: 1g`, `shm_size: 256m`, `pids_limit: 256`, `networks: [backend]`, `restart: unless-stopped`.
@@ -1200,13 +1204,13 @@ Capacitor is item (k). It is documented here so the path is clear, and it is not
 
 ## Unresolved Gaps (carry to the owner or to other plans)
 
-1. Domain name for `DOMAIN` is still needed. Let's Encrypt certificates (Caddy, with `ACME_EMAIL` for expiry notices) and the health check need it.
+1. Resolved by decision 2026-11-04: the domain is `hungrybro.pacewisdom.in` (Cloudflare proxy ON, Full (strict), Cloudflare Origin CA certificate on the server). The origin certificate and key must be installed on the host by the owner or the deploy runbook; they are not in the repo. The original item (Let's Encrypt, `ACME_EMAIL`) is superseded.
 2. Owner creates the external uptime monitor account. The plan documents the URL and the check settings: 5-minute interval, since free tiers do not offer 1-minute checks (decision 5).
 3. GHCR pull token (`read:packages`) for the host must be created by the owner.
 4. Plans 02 and 03 must provide the test hooks listed in Task 11. Neither plan defines them yet.
 5. OWNER TO SET a real address. The delivery E2E drop point (`DROP`) is a placeholder midway between the Indiranagar and HSR clusters, so both pilot clusters are in range.
 6. OTP and login rate limits are not in this plan; Plan 05 reuses `consumeToken` with its own limits.
-7. Cloudflare WAF is deferred per tech decisions. Switching the client-IP source to `CF-Connecting-IP` is a one-line Caddy change when it lands.
+7. Cloudflare WAF is deferred per tech decisions. Decision 2026-11-04 turns the Cloudflare proxy on, so the client-IP source moves to `CF-Connecting-IP` (a Caddy change, trusted only from Cloudflare's published ranges) when the edge is deployed. WAF rules are still a later step.
 8. Migrations must stay expand-only for the rollback path to be safe. Plans 02 to 06 must follow this rule.
 9. Nonce-based CSP is deferred; the current policy uses `unsafe-inline` for scripts and styles.
 10. Resolved (Gap B): Task 6 archives `proxy-caddy-data` weekly to `caddy/` with a 14-day lifecycle and a restore check (`scripts/caddy-data-backup.sh check`).

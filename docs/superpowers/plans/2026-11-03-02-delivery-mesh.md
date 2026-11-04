@@ -12,13 +12,19 @@
 
 ## Scope
 
+> **Decision 2026-11-04 (owner, binding).** Two rules in this plan are operational constraints, not labels:
+> 1. **Load threshold is inclusive.** A kitchen with `active_kds_load` exactly `0.85` is eligible; only a load greater than `0.85` is excluded. Every "strictly below" or "`>= 0.85`" wording below is superseded: eligible when `load <= 0.85`.
+> 2. **Under-30-minutes SLA is enforced.** A kitchen is eligible for a bid only when `prep_time + transit_time + buffer <= max_sla_minutes`. `max_sla_minutes` defaults to `30` when the diner gives none (the delivery SLA range stays an integer 15 to 120 minutes). `buffer` is `3` minutes (engineering default). `prep_time` is the bid's `estimatedPrepMinutes`. `transit_time` is `ceil(distanceM / 1000 / 20 * 60)` minutes (20 km/h, the same basis as the 6 km note in the roadmap). The check runs in `evaluateCounterBids` (Task 3) and is tested there. The UI shows the SLA as the enforced limit, not as a promise the engine does not check.
+>
+> Engineering chose the transit formula and buffer; the owner set the 30-minute SLA and the inclusive 0.85 threshold. Recorded in `2026-11-03-00-roadmap.md`.
+
 In:
-- (a) Matching engine (md §5) using the Plan 01 pricing rules (`quoteBundle`), 6 km radius, load strictly below 0.85.
+- (a) Matching engine (md §5) using the Plan 01 pricing rules (`quoteBundle`), 6 km radius, load at or below 0.85 (inclusive), and the under-30-minute SLA check (decision note above).
 - (b) PostGIS `KitchenRepository` (`ST_MakePoint(lng, lat)`).
 - (c) Redis Pub/Sub geohash channels; 18 s bid window inside a 90 s lifetime; counter-bids persisted to `auction_counter_bids`.
 - (d) `POST /api/delivery/intent` validating `DeliveryIntentSchema` and returning ranked bundles.
 - (e) Route 2 at `app/delivery/page.tsx`: typed-text voice stub, extracted metadata card, live counter-bid list over SSE, 3PL status panel with a mocked rider, handshake token, and 68 °C hot-bag temperature.
-- (f) 3PL dispatch: uses Plan 06 Task 12's `DispatchAdapter` (`createTask`, `getTask`, `cancelTask`); this plan adds a sandbox implementation only.
+- (f) 3PL dispatch: uses Plan 06 Task 12's `DispatchAdapter` (`createTask`, `getTask`, `cancelTask`); this plan adds a sandbox implementation only. Decision 2026-11-04: the logistics cost of each dispatched task is passed through at cost (about INR 50 baseline) and recorded in the business ledger (planned migration `010_business_ledger`); this plan does not write ledger rows and does not change the mesh fee.
 
 Out (other plans): real Shadowfax/Rapido/Dunzo wiring (Plan 06); voice capture and LLM extraction (Plan 04); phone OTP and real sessions (Plan 05); production seed data and E2E tests (Plan 07); Socket.io (not used; SSE per tech decisions). Ratings: this plan does not read or write ratings; the 2-second rating window belongs to Plan 05.
 
@@ -50,7 +56,7 @@ Out (other plans): real Shadowfax/Rapido/Dunzo wiring (Plan 06); voice capture a
 - PostgreSQL 16 `postgis/postgis:16-3.4`; Redis 7 Alpine.
 - `GEOGRAPHY(Point, 4326)`; SQL points `ST_MakePoint(lng, lat)`; app coordinates `{ lat, lng }`.
 - Money `NUMERIC(10, 2)`; `round2` half-up; all money through `quoteBundle` or `round2`.
-- Constants: mesh fee `0.035`; floor margin default `0.05`; transit radius `6000` m; max load `0.85` (strict `<`); bid window `18` s; auction lifetime `90` s; geohash precision `5`.
+- Constants: mesh fee `0.035`; floor margin default `0.05`; transit radius `6000` m; max load `0.85` (inclusive: eligible when load `<= 0.85`; decision 2026-11-04); SLA buffer `3` min and default `max_sla_minutes` `30` (decision 2026-11-04); bid window `18` s; auction lifetime `90` s; geohash precision `5`.
 - Time comparisons use the database clock (`now()`), never the app clock.
 - Tests use real PostGIS and Redis (via Compose on `127.0.0.1`). No mocks for the database or Redis. Pure logic may use plain fixture objects.
 - Vitest runs with `fileParallelism: false` because test files share one database.
@@ -61,7 +67,7 @@ Out (other plans): real Shadowfax/Rapido/Dunzo wiring (Plan 06); voice capture a
 ## Review Focus
 
 1. A bid submitted after 18 s is rejected by the repository (`BidWindowClosedError`) and by the RLS insert policy. Owned by Task 1 (policy) and Task 6 (repository).
-2. Kitchens at load `>= 0.85` never appear as candidates or bundles, checked in SQL and again in the engine. Owned by Task 3 (engine) and Task 4 (SQL).
+2. Kitchens at load `> 0.85` never appear as candidates or bundles (load exactly `0.85` is eligible; decision 2026-11-04), checked in SQL and again in the engine. Kitchens failing `prep + transit + buffer <= max_sla_minutes` never win a bid. Owned by Task 3 (engine) and Task 4 (SQL).
 3. Every SQL point is `ST_MakePoint(lng, lat)`, verified by a distance assertion. Owned by Task 4.
 4. A counter-bid below the kitchen floor, above the diner's budget, or with a zero or negative offer is never ranked. Owned by Task 3.
 5. No real 3PL can be reached in v1: this plan constructs only `createSandboxDispatch()`, and `assertSandboxDispatchMode()` throws when `DISPATCH_MODE=live`. Owned by Task 5.
@@ -304,7 +310,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
   - `interface RankedBundle { restaurantId: string; name: string; distanceM: number; offeredPriceInr: number; meshFee: number; kitchenNet: number; estimatedPrepMinutes: number; ratingAggregate: number; bundleContents: MatchedLine[] }`
   - `interface KitchenSearch { point: LatLng; radiusM: number; maxLoad: number; items: Array<{ query: string; servingTarget: number }>; dietaryProfiles: string[] }`
   - `interface KitchenRepository { findCandidates(search: KitchenSearch): Promise<KitchenCandidate[]> }`
-  - `evaluateCounterBids(candidates: KitchenCandidate[], bids: CounterBid[], budgetInr: number): RankedBundle[]`
+  - `evaluateCounterBids(candidates: KitchenCandidate[], bids: CounterBid[], budgetInr: number, slaMaxMinutes = 30): RankedBundle[]` (the `slaMaxMinutes` argument is added by decision 2026-11-04)
   - `matchKitchenNodes(repo: KitchenRepository, intent: DeliveryIntent): Promise<KitchenCandidate[]>`
 
 - [ ] **Step 1: Write the failing tests**
@@ -330,9 +336,20 @@ test('ranks passing bids by price ascending and reports the mesh fee split', () 
   expect(out[0]).toMatchObject({ offeredPriceInr: 710, meshFee: 24.85, kitchenNet: 685.15 });
 });
 
-test('excludes kitchens at load 0.85 or above (strict), even if they bid (Review Focus 2)', () => {
-  const cands = [cand('BUSY', { activeKdsLoad: 0.85 })];
-  expect(evaluateCounterBids(cands, [bid('BUSY', 690)], 800)).toEqual([]);
+test('excludes kitchens above load 0.85 and keeps load exactly 0.85 (inclusive, decision 2026-11-04)', () => {
+  const over = [cand('BUSY', { activeKdsLoad: 0.86 })];
+  expect(evaluateCounterBids(over, [bid('BUSY', 690)], 800)).toEqual([]);
+  const exact = [cand('EDGE', { activeKdsLoad: 0.85 })];
+  expect(evaluateCounterBids(exact, [bid('EDGE', 690)], 800)).toHaveLength(1);
+});
+
+test('excludes a kitchen whose prep + transit + buffer exceeds the 30-minute SLA (decision 2026-11-04)', () => {
+  // 6 km transit is 18 min; 12 min prep + 18 + 3 buffer = 33 > 30.
+  const far = [cand('FAR', { distanceM: 6000 })];
+  expect(evaluateCounterBids(far, [bid('FAR', 690, 12)], 800, 30)).toEqual([]);
+  // 1.4 km transit is 5 min; 12 + 5 + 3 = 20 <= 30.
+  const near = [cand('NEAR', { distanceM: 1400 })];
+  expect(evaluateCounterBids(near, [bid('NEAR', 690, 12)], 800, 30)).toHaveLength(1);
 });
 
 test('excludes bids above the budget ceiling', () => {
@@ -374,19 +391,20 @@ Expected: FAIL, "Cannot find module '@/lib/auction/engine'".
 
 Fixed logic for `evaluateCounterBids`, in this order for each bid:
 1. Find the candidate with the same `restaurantId`. None: skip.
-2. If `candidate.activeKdsLoad >= AUCTION_MAX_LOAD`: skip.
+2. If `candidate.activeKdsLoad > AUCTION_MAX_LOAD`: skip (load exactly 0.85 is eligible; decision 2026-11-04).
+2a. SLA (decision 2026-11-04): `transitMin = Math.ceil(candidate.distanceM / 1000 / 20 * 60)`; if `bid.estimatedPrepMinutes + transitMin + SLA_BUFFER_MIN > slaMaxMinutes`, skip. `SLA_BUFFER_MIN = 3`. `slaMaxMinutes` is the 4th argument of `evaluateCounterBids` (default `30`), taken from `intent.sla_max_minutes`.
 3. Call `quoteBundle(bid.bundleContents.map(l => ({ basePrice: l.basePrice, quantity: l.quantity })), bid.offeredPriceInr, candidate.floorMargin)`. Catch `RangeError` and skip.
 4. If `!quote.passesFloor` or `bid.offeredPriceInr > budgetInr`: skip.
 5. Otherwise emit a `RankedBundle` with the quote's `meshFee` and `kitchenNet`.
 
 Sort by `offeredPriceInr` ascending, then `ratingAggregate` descending, then `estimatedPrepMinutes` ascending, then `distanceM` ascending.
 
-`matchKitchenNodes`: call `repo.findCandidates({ point: intent.client_coordinates, radiusM: TRANSIT_RADIUS_M, maxLoad: AUCTION_MAX_LOAD, items: intent.items_requested.map(i => ({ query: i.query, servingTarget: i.serving_target })), dietaryProfiles: intent.target_dietary_profiles })`, then drop any candidate with `activeKdsLoad >= AUCTION_MAX_LOAD` or with `distanceM > TRANSIT_RADIUS_M`.
+`matchKitchenNodes`: call `repo.findCandidates({ point: intent.client_coordinates, radiusM: TRANSIT_RADIUS_M, maxLoad: AUCTION_MAX_LOAD, items: intent.items_requested.map(i => ({ query: i.query, servingTarget: i.serving_target })), dietaryProfiles: intent.target_dietary_profiles })`, then drop any candidate with `activeKdsLoad > AUCTION_MAX_LOAD` (inclusive threshold, decision 2026-11-04) or with `distanceM > TRANSIT_RADIUS_M`.
 
 - [ ] **Step 4: Verify**
 
 Run: `npx vitest run tests/auction/engine.test.ts`
-Expected: 6 passed.
+Expected: 8 passed. (The original text said 6, but the test block as written had 7 tests; decision 2026-11-04 adds the 30-minute SLA test, giving 8.)
 
 - [ ] **Step 5: Commit**
 
@@ -408,7 +426,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - Consumes: `KitchenRepository`, `KitchenSearch`, `KitchenCandidate` from `@/lib/auction/engine`; `getPool` types from `@/lib/db/client`; helpers from Task 1 (`makeRestaurant`, `makeMenuItem`).
 - Produces: `createPostgisKitchenRepository(pool: pg.Pool): KitchenRepository`
 
-Approach (fixed): (1) one query selects restaurants where `ST_DWithin(r.location, ST_SetSRID(ST_MakePoint($lng, $lat), 4326)::geography, $radius)`, `r.active_kds_load < $maxLoad`, and `r.is_accepting_delivery`, returning `ST_Distance` as `distance_m`. (2) For the returned restaurant ids, one query selects in-stock menu items whose `name ILIKE '%' || query || '%'` and whose `dietary` is in `dietaryProfiles` when that list is non-empty. (3) For each restaurant, each requested query takes the cheapest matching item; if any query has no match, the restaurant is dropped. Line `quantity` is the query's `servingTarget`.
+Approach (fixed): (1) one query selects restaurants where `ST_DWithin(r.location, ST_SetSRID(ST_MakePoint($lng, $lat), 4326)::geography, $radius)`, `r.active_kds_load <= $maxLoad` (inclusive, decision 2026-11-04), and `r.is_accepting_delivery`, returning `ST_Distance` as `distance_m`. (2) For the returned restaurant ids, one query selects in-stock menu items whose `name ILIKE '%' || query || '%'` and whose `dietary` is in `dietaryProfiles` when that list is non-empty. (3) For each restaurant, each requested query takes the cheapest matching item; if any query has no match, the restaurant is dropped. Line `quantity` is the query's `servingTarget`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -442,14 +460,14 @@ test('includes a kitchen 5.5 km away and excludes one 6.8 km away (6 km radius)'
   expect(ids).not.toContain(far);
 });
 
-test('load 0.85 is excluded and 0.84 is included (Review Focus 2)', async () => {
+test('load 0.85 is included and 0.86 is excluded (Review Focus 2, inclusive per decision 2026-11-04)', async () => {
   const t = tag();
   const at85 = await makeRestaurant(pool, { lat: Q.lat + 0.001, lng: Q.lng, load: 0.85 });
-  const at84 = await makeRestaurant(pool, { lat: Q.lat + 0.001, lng: Q.lng, load: 0.84 });
-  for (const r of [at85, at84]) await makeMenuItem(pool, r, t, 200);
+  const at86 = await makeRestaurant(pool, { lat: Q.lat + 0.001, lng: Q.lng, load: 0.86 });
+  for (const r of [at85, at86]) await makeMenuItem(pool, r, t, 200);
   const ids = (await repo.findCandidates(search([t]))).map((c) => c.restaurantId);
-  expect(ids).toContain(at84);
-  expect(ids).not.toContain(at85);
+  expect(ids).toContain(at85);
+  expect(ids).not.toContain(at86);
 });
 
 test('distance reflects ST_MakePoint(lng, lat) order (Review Focus 3)', async () => {
@@ -1071,7 +1089,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - `npm test` passes all suites, including Plan 01 suites, with `fileParallelism: false`.
 - A seeded search (`POST /api/delivery/intent`) returns `201` with ranked bundles, cheapest first, excluding `HSR Busy Kitchen` (load 0.91).
 - A bid at 18.5 seconds is rejected by both `submitCounterBid` (`BidWindowClosedError`) and the RLS insert policy.
-- Kitchens at load 0.85 are excluded; kitchens at 0.84 are included.
+- Kitchens at load 0.85 are included; kitchens above 0.85 (for example 0.86) are excluded (decision 2026-11-04). Kitchens that would miss the 30-minute SLA (prep + transit + 3-minute buffer) are excluded from the bid ranking.
 - The 6 km radius is tested at 5.5 km (in) and 6.8 km (out); distances confirm `ST_MakePoint(lng, lat)`.
 - The 3PL path is sandbox-only; `DISPATCH_MODE=live` throws.
 - SSE delivers the snapshot and forwards bids from Redis; no Socket.io dependency is added.

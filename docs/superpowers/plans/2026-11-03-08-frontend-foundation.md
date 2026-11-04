@@ -35,6 +35,7 @@
 - Respect safe-area insets (`env(safe-area-inset-bottom)`) for the bottom action bar.
 - Tokens below are the single source of colour and radius values. No hard-coded hex values in components.
 - Dine-in SLA colours follow decision 3 in the tech decisions file: green under 5 min, yellow from 5 min until the SLA, red after the SLA (8 min dine-in, 12 min delivery).
+  - Clarification (decision 2026-11-04): the 8 and 12 minute values are the kitchen ticket SLA on the KDS. They are not the customer-facing delivery promise. The delivery promise is the under-30-minute constraint (`max_sla_minutes`, default 30) enforced in Plan 02. The UI may show the 30-minute limit as the enforced SLA; it must not show a 12-minute value as the delivery time.
 
 ## Design Tokens (reference values)
 
