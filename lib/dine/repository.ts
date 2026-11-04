@@ -2,7 +2,8 @@ import type pg from 'pg';
 import { asRole } from '@/lib/db/client';
 import { asSession } from '@/lib/db/session';
 import { canTransition } from './session-state';
-import { issueSessionToken, verifyTableSignature } from './signature';
+import { issueSessionToken } from './signature';
+import { publishKdsEvent } from '@/lib/kds/events';
 import { computeSettlement, type SettlementLine } from '@/lib/settlement/split';
 import type { PaymentIntentAdapter } from '@/lib/payments/intent';
 import type { SessionStatus } from '@/types/food-os';
@@ -17,42 +18,19 @@ export interface SplitParticipant {
   paid: boolean;
 }
 
-/**
- * Legal moves only (session-state.ts), checked in code and then enforced by the guarded UPDATE.
- * Returns closed_at, which is set when the session moves to closed.
- */
-export async function transitionSession(
-  c: pg.PoolClient,
-  sessionId: string,
-  from: SessionStatus,
-  to: SessionStatus,
-  ctx: { anyShareSettled: boolean },
-): Promise<Date | null> {
-  if (!canTransition(from, to, ctx)) throw new Error('INVALID_TRANSITION');
-  const closing = to === 'closed';
-  const { rows, rowCount } = await c.query<{ closed_at: Date | null }>(
-    `UPDATE tabletop_sessions
-        SET status = $3${closing ? ', closed_at = NOW()' : ''}
-      WHERE id = $1 AND status = $2
-      RETURNING closed_at`,
-    [sessionId, from, to],
-  );
-  if (rowCount === 0) throw new Error('INVALID_TRANSITION');
-  return rows[0].closed_at;
-}
-
 export async function openTableSession(
   pool: pg.Pool,
   input: { restaurantId: string; tableNumber: string; signature: string; userId?: string | null },
 ): Promise<{ sessionId: string; sessionToken: string; status: SessionStatus }> {
   if (!UUID_RE.test(input.restaurantId)) throw new Error('TABLE_NOT_FOUND');
+  // The signature is compared inside the database; the stored token is never returned.
   const { rows } = await asRole(pool, null, (c) =>
-    c.query<{ table_id: string; restaurant_id: string; current_signature_token: string }>(
-      'SELECT table_id, restaurant_id, current_signature_token FROM app_lookup_table($1, $2)',
-      [input.restaurantId, input.tableNumber]));
+    c.query<{ table_id: string; restaurant_id: string; signature_ok: boolean }>(
+      'SELECT table_id, restaurant_id, signature_ok FROM app_verify_table_signature($1, $2, $3)',
+      [input.restaurantId, input.tableNumber, input.signature]));
   const table = rows[0];
   if (!table) throw new Error('TABLE_NOT_FOUND');
-  if (!verifyTableSignature(table.current_signature_token, input.signature)) throw new Error('INVALID_SIGNATURE');
+  if (!table.signature_ok) throw new Error('INVALID_SIGNATURE');
 
   const findOpen = () => asSession(pool, { tableSignature: input.signature }, async (c) => {
     const r = await c.query<{ id: string; session_token: string; status: SessionStatus }>(
@@ -100,10 +78,7 @@ export async function requestSplit(
 ): Promise<{ sessionId: string; subtotal: number; gst: number; total: number; shares: SplitShare[] }> {
   return asSession(pool, { sessionToken: input.sessionToken }, async (c) => {
     const s = await c.query<{ id: string; status: SessionStatus; restaurant_id: string }>(
-      `SELECT s.id, s.status, dt.restaurant_id
-         FROM tabletop_sessions s JOIN dining_tables dt ON dt.id = s.table_id
-        WHERE s.session_token = $1
-        FOR UPDATE OF s`,
+      `SELECT id, status, restaurant_id FROM app_lock_session($1)`,
       [input.sessionToken]);
     const session = s.rows[0];
     if (!session || !canTransition(session.status, 'payment_pending', { anyShareSettled: false })) {
@@ -141,15 +116,12 @@ export async function requestSplit(
       shares.push({ index: share.index, amount: share.amount, intentId: intent.intentId, upiUri: intent.upiUri });
     }
 
-    await transitionSession(c, session.id, session.status, 'payment_pending', { anyShareSettled: false });
     const participants: SplitParticipant[] = shares.map((x) => ({
       index: x.index, amount: x.amount, intentId: x.intentId, paid: false,
     }));
-    await c.query(
-      `UPDATE tabletop_sessions
-          SET subtotal = $2, tax_amount = $3, total_amount = $4, bill_split_spec = $5
-        WHERE id = $1`,
-      [session.id, settlement.subtotal, settlement.gst, settlement.total,
+    // Status, totals, and shares change only through the settlement function (migration 008).
+    await c.query('SELECT app_begin_settlement($1, $2, $3, $4, $5)',
+      [input.sessionToken, settlement.subtotal, settlement.gst, settlement.total,
         JSON.stringify({ strategy: input.strategy, contributor_count: input.contributorCount, participants })]);
 
     return {
@@ -174,15 +146,12 @@ export async function refreshSettlement(
   if (pre.rowCount === 0) throw new Error('SESSION_NOT_FOUND');
   const dinerId = pre.rows[0].diner_user_id;
 
-  return asSession(pool, { sessionToken: input.sessionToken, userId: dinerId }, async (c) => {
+  const { closedNow, ...result } = await asSession(pool, { sessionToken: input.sessionToken, userId: dinerId }, async (c) => {
     const r = await c.query<{
       id: string; status: SessionStatus; diner_user_id: string | null; restaurant_id: string;
       bill_split_spec: { strategy: string; contributor_count: number; participants: SplitParticipant[] };
     }>(
-      `SELECT s.id, s.status, s.diner_user_id, dt.restaurant_id, s.bill_split_spec
-         FROM tabletop_sessions s JOIN dining_tables dt ON dt.id = s.table_id
-        WHERE s.session_token = $1
-        FOR UPDATE OF s`,
+      `SELECT id, status, diner_user_id, restaurant_id, bill_split_spec FROM app_lock_session($1)`,
       [input.sessionToken]);
     const session = r.rows[0];
     if (!session) throw new Error('SESSION_NOT_FOUND');
@@ -191,31 +160,34 @@ export async function refreshSettlement(
     const participants = spec.participants ?? [];
     if (session.status !== 'payment_pending') {
       const paid = participants.filter((p) => p.paid).length;
-      return { status: session.status, paidShares: paid, totalShares: participants.length };
+      return { status: session.status, paidShares: paid, totalShares: participants.length, closedNow: null };
     }
 
     for (const p of participants) {
       if (!p.paid && (await adapter.getStatus(p.intentId)) === 'settled') p.paid = true;
     }
     const paidShares = participants.filter((p) => p.paid).length;
-    const allPaid = participants.length > 0 && paidShares === participants.length;
-    let status: SessionStatus = session.status;
-
-    if (allPaid) {
-      await transitionSession(c, session.id, 'payment_pending', 'closed', { anyShareSettled: true });
-      status = 'closed';
-      // Order record for a logged-in diner (decision 4). Settlement time = closed_at, which starts
-      // the 2-second rating window. Guest sessions have no diner id and write no row.
-      if (session.diner_user_id) {
-        await c.query(
-          `INSERT INTO order_refs (restaurant_id, diner_user_id, session_id, status, settled_at)
-           VALUES ($1, $2, $3, 'completed', (SELECT closed_at FROM tabletop_sessions WHERE id = $3))`,
-          [session.restaurant_id, session.diner_user_id, session.id]);
-      }
-    }
-
-    await c.query('UPDATE tabletop_sessions SET bill_split_spec = $2 WHERE id = $1',
-      [session.id, JSON.stringify({ ...spec, participants })]);
-    return { status, paidShares, totalShares: participants.length };
+    // The function stores the shares and closes the session (writing the order record for a
+    // logged-in diner) only when every share is paid. Settlement time is the close time.
+    const { rows: st } = await c.query<{ status: SessionStatus }>(
+      'SELECT app_apply_settlement_state($1, $2) AS status',
+      [input.sessionToken, JSON.stringify({ ...spec, participants })]);
+    // Past the early return the session was payment_pending, so 'closed' here means this call closed it.
+    const justClosed = st[0].status === 'closed';
+    return {
+      status: st[0].status,
+      paidShares,
+      totalShares: participants.length,
+      closedNow: justClosed ? { restaurantId: session.restaurant_id, sessionId: session.id } : null,
+    };
   });
+
+  // Publish only after the commit above. A failed publish must not fail the settlement itself:
+  // the diner's next poll still sees the closed state from the database.
+  if (closedNow) {
+    const { restaurantId, sessionId } = closedNow;
+    await publishKdsEvent({ type: 'session.settled', restaurantId, sessionId })
+      .catch((err: unknown) => console.error('settlement publish failed', err instanceof Error ? err.message : 'unknown'));
+  }
+  return result;
 }

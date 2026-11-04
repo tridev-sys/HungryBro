@@ -70,6 +70,7 @@ export function DineInScreen({
         ))}
       </div>
       {menu}
+      <h2 className="sr-only">Active tickets</h2>
       <TicketStrip>
         {tickets.map((t) => (
           <TicketCard key={t.ticketNumber} {...t} />

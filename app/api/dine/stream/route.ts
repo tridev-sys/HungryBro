@@ -1,3 +1,4 @@
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool } from '@/lib/db/client';
 import { asSession } from '@/lib/db/session';
 import { readTableSessionToken } from '@/lib/dine/cookie';
@@ -12,7 +13,7 @@ const HEARTBEAT_MS = 15_000;
  * Diner live feed. Forwards only events whose sessionId is the cookie's open session. A wrong or
  * missing token gets 401 and reveals nothing.
  */
-export async function GET(request: Request) {
+async function handleGet(request: Request) {
   const token = readTableSessionToken(request.headers.get('cookie'));
   if (!token) return new Response('Unauthorized', { status: 401 });
 
@@ -65,3 +66,5 @@ export async function GET(request: Request) {
     },
   });
 }
+
+export const GET = withApiGuards(handleGet, { sessionToken: publicSessionToken });

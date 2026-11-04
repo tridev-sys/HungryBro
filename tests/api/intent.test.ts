@@ -47,3 +47,20 @@ test('a seeded search returns ranked bundles, cheapest first, excluding the busy
   expect(prices).toEqual([...prices].sort((a, b) => a - b));
   expect(prices.every((p) => p <= 800)).toBe(true);
 });
+
+// Redis is unreachable: point the bus at a closed loopback port. The intent must answer with a
+// stable 503 quickly instead of hanging until the client gives up.
+test('with the mesh bus unavailable, the intent returns 503 MESH_BUS_UNAVAILABLE within 2 s', async () => {
+  const saved = process.env.REDIS_URL;
+  process.env.REDIS_URL = 'redis://127.0.0.1:1';
+  try {
+    const started = Date.now();
+    const res = await POST(req(body()));
+    const elapsed = Date.now() - started;
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'mesh bus unavailable', code: 'MESH_BUS_UNAVAILABLE' });
+    expect(elapsed).toBeLessThan(2500);
+  } finally {
+    process.env.REDIS_URL = saved;
+  }
+}, 10_000);

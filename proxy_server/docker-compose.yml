@@ -1,5 +1,6 @@
 # Shared reverse proxy. The only service that publishes host ports (80, 443).
 # App stacks join the external network "shared" and use `expose` only.
+# Run from /home/ubuntu/docker/proxy_server/. Its volumes are never removed by `down`.
 services:
   caddy:
     image: caddy:2-alpine
@@ -17,12 +18,28 @@ services:
       - caddy_config:/config
     networks:
       - shared
+    cpus: 0.5
     mem_limit: 128m
+    mem_reservation: 64m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   shared:
     external: true
 
 volumes:
-  caddy_data: {}
-  caddy_config: {}
+  caddy_data:
+    name: proxy-caddy-data
+    labels:
+      app: food-os
+      purpose: tls-certificates
+  caddy_config:
+    name: proxy-caddy-config
+    labels:
+      app: food-os
+      purpose: caddy-config

@@ -20,7 +20,7 @@ export function selectSpeechProviders(
   deps: { fetchImpl?: typeof fetch } = {},
 ): SpeechProviders {
   const stt = present(env.DEEPGRAM_API_KEY)
-    ? createDeepgramStt({ apiKey: env.DEEPGRAM_API_KEY, fetchImpl: deps.fetchImpl })
+    ? createDeepgramStt({ apiKey: env.DEEPGRAM_API_KEY })
     : new FakeStt({ text: '' });
   const tts = present(env.CARTESIA_API_KEY)
     ? createCartesiaTts({

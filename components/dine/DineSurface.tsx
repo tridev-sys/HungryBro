@@ -7,6 +7,7 @@ import { MenuList } from '@/components/dine/MenuList';
 import { BillSplitSelector } from '@/components/dine/BillSplitSelector';
 import { DynamicUpiQrModal, type UpiShare } from '@/components/dine/DynamicUpiQrModal';
 import { TableSessionGate } from '@/components/dine/TableSessionGate';
+import { RatingModal } from '@/components/ratings/RatingModal';
 import type { TicketCardProps } from '@/components/kds/TicketCard';
 import { slaColor } from '@/lib/kds/timers';
 import type { TicketView } from '@/lib/kds/ticket-view';
@@ -30,9 +31,19 @@ export interface DineSurfaceProps {
   session: DineSessionView | null;
   tickets: TicketView[];
   menu: MenuCard[];
+  /** A completed order of this session the signed-in diner can rate, or null (no prompt). */
+  ratingOrderRefId: string | null;
 }
 
 const ALLERGENS: AllergenTag[] = ['peanut', 'shellfish', 'dairy', 'gluten'];
+
+/**
+ * How often the diner checks payment while the bill is pending. The rating window is 2 s from the
+ * server-recorded settled_at, so a stale check must not cost the diner the prompt. The stream
+ * (session.settled) gives the instant update; this poll is what asks the payment provider.
+ */
+export const SETTLEMENT_POLL_MS = 1000;
+
 const NO_FILTERS: FilterState = { pureVeg: false, jain: false, halal: false, mildSpicy: false };
 
 function toCard(t: TicketView, nowMs: number | null): TicketCardProps {
@@ -61,6 +72,7 @@ export function DineSurface(props: DineSurfaceProps) {
   const [nowMs, setNowMs] = useState<number | null>(null);
   const [level, setLevel] = useState(0);
   const [line, setLine] = useState(0);
+  const [ratingOpen, setRatingOpen] = useState(true);
   const sessionOpen = props.session !== null && props.session.status === 'active';
   const paying = props.session?.status === 'payment_pending';
 
@@ -77,12 +89,19 @@ export function DineSurface(props: DineSurfaceProps) {
     return () => { clearInterval(id); clearInterval(lines); };
   }, []);
 
-  // Live ticket updates for this table's session.
+  // Live ticket updates and settlement for this table's session.
+  const hasSession = props.session !== null;
   useEffect(() => {
-    if (!props.session) return;
+    if (!hasSession) return;
     const source = new EventSource('/api/dine/stream');
     source.onmessage = (msg: MessageEvent<string>) => {
       const event = JSON.parse(msg.data) as { type?: string; ticket?: TicketView };
+      if (event.type === 'session.settled') {
+        // The server re-renders with the closed session and the ratable order, so the prompt
+        // opens from the same fetch rather than waiting for the next poll tick.
+        router.refresh();
+        return;
+      }
       if (!event.ticket) return;
       const ticket = event.ticket;
       setTickets((prev) => {
@@ -91,9 +110,9 @@ export function DineSurface(props: DineSurfaceProps) {
       });
     };
     return () => source.close();
-  }, [props.session]);
+  }, [hasSession, router]);
 
-  // While payment is pending, poll the settlement until every share is paid.
+  // While payment is pending, check the settlement until every share is paid.
   useEffect(() => {
     if (!paying) return;
     const id = setInterval(async () => {
@@ -103,7 +122,7 @@ export function DineSurface(props: DineSurfaceProps) {
       } catch {
         /* keep polling; a transient failure is not an error for the diner */
       }
-    }, 4000);
+    }, SETTLEMENT_POLL_MS);
     return () => clearInterval(id);
   }, [paying, router]);
 
@@ -210,6 +229,13 @@ export function DineSurface(props: DineSurfaceProps) {
         menu={menuPanel}
       />
       {shares && qrOpen ? <DynamicUpiQrModal shares={shares} onClose={() => setQrOpen(false)} /> : null}
+      {props.ratingOrderRefId && ratingOpen ? (
+        <RatingModal
+          orderRefId={props.ratingOrderRefId}
+          restaurantName={props.restaurantName}
+          onClose={() => setRatingOpen(false)}
+        />
+      ) : null}
     </>
   );
 }

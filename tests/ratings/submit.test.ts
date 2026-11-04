@@ -32,6 +32,13 @@ test('accepts a rating submitted immediately after settlement', async () => {
   expect(r.ok).toBe(true);
 });
 
+test('accepts a rating submitted 1.5 seconds after settlement (inside the 2 s window)', async () => {
+  const diner = await makeUser(pool);
+  const { orderId } = await completedOrder(diner, '1500 milliseconds');
+  const r = await submitVerifiedRating(pool, diner, input(orderId));
+  expect(r.ok).toBe(true);
+});
+
 test('rejects a rating submitted 2.5 seconds after settlement (Review Focus 5)', async () => {
   const diner = await makeUser(pool);
   const { orderId } = await completedOrder(diner, '2500 milliseconds');
@@ -90,4 +97,34 @@ test('route returns 422 for the window rule and 201 inside it', async () => {
   }));
   expect((await call(late.orderId)).status).toBe(422);
   expect((await call(ok.orderId)).status).toBe(201);
+});
+
+test('route accepts a rating for settled_at = now and stores the row for the correct order', async () => {
+  // Deterministic: settled_at is set to the fixture's NOW() (no sleep). Two completed orders for the
+  // same diner; only the second is rated, so the row must be attached to that order and nothing else.
+  const diner = await makeUser(pool, 'diner');
+  const token = (await issueSession({ id: diner, role: 'diner' })).token;
+  const other = await completedOrder(diner, '1 hour');
+  const target = await completedOrder(diner, null);
+  const res = await POST(new Request('http://localhost:3000/api/ratings', {
+    method: 'POST',
+    headers: { cookie: `fos_session=${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(input(target.orderId, { rating_score: 4, review_tags: ['Fast Prep'] })),
+  }));
+  expect(res.status).toBe(201);
+  const { ratingId } = await res.json() as { ratingId: string };
+  const { rows } = await pool.query(
+    `SELECT id, order_ref_id, restaurant_id, diner_user_id, rating_score
+       FROM verified_customer_ratings WHERE order_ref_id = $1`, [target.orderId]);
+  expect(rows).toHaveLength(1);
+  // rating_score is NUMERIC(2,1), so pg returns a string; compare it as a number.
+  expect({ ...rows[0], rating_score: Number(rows[0].rating_score) }).toEqual({
+    id: ratingId,
+    order_ref_id: target.orderId,
+    restaurant_id: target.restaurant,
+    diner_user_id: diner,
+    rating_score: 4,
+  });
+  const { rowCount } = await pool.query(`SELECT 1 FROM verified_customer_ratings WHERE order_ref_id = $1`, [other.orderId]);
+  expect(rowCount).toBe(0);
 });

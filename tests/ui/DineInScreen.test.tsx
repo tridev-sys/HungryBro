@@ -31,3 +31,9 @@ test('payment and steward buttons fire their handlers', () => {
   expect(props.onPay).toHaveBeenCalledTimes(1);
   expect(props.onCallSteward).toHaveBeenCalledTimes(1);
 });
+
+test('ticket section has a level-2 heading above the level-3 ticket titles', () => {
+  render(<DineInScreen {...props} />);
+  expect(screen.getByRole('heading', { level: 2, name: 'Active tickets' })).toBeTruthy();
+  expect(screen.getByRole('heading', { level: 3, name: 'Ticket #01' })).toBeTruthy();
+});

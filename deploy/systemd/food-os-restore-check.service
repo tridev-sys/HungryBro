@@ -1,0 +1,12 @@
+[Unit]
+Description=Monthly restore check of the latest food_os backup
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/home/ubuntu/docker
+EnvironmentFile=/home/ubuntu/docker/.env
+ExecStart=/home/ubuntu/docker/scripts/restore-check.sh latest
+ExecStart=/home/ubuntu/docker/scripts/caddy-data-backup.sh check latest
