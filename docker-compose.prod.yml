@@ -33,7 +33,7 @@ services:
   db:
     ports: !reset []
     volumes: !override
-      - ${PGDATA_DIR:-/home/ubuntu/docker/data/postgres}:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     networks: !override
       - backend
     cpus: 2.0
@@ -52,3 +52,12 @@ services:
     mem_reservation: 128m
     pids_limit: 128
     restart: unless-stopped
+
+# Postgres data is the named volume food-os-pgdata on the root EBS disk (storage decision 2026-11-04).
+# The 100 GB data disk is not used. Declared with the same name and labels as the base file.
+volumes:
+  pgdata:
+    name: food-os-pgdata
+    labels:
+      app: food-os
+      purpose: postgres-data

@@ -5,6 +5,7 @@ dist-scripts
 .env*
 *.log
 data/
+backups-scratch/
 
 test-results
 playwright-report

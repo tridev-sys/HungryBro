@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-time host setup for the c7i.xlarge (Ubuntu, ap-south-1). Run as root. Safe to re-run.
-# Host runs Docker only. Installs Docker Engine + Compose plugin, a deploy user, 2 GiB swap, the
-# data volume mount, UFW (22, 80, 443 only), SSH hardening, and unattended upgrades.
+# Host runs Docker only. Installs Docker Engine + Compose plugin, a deploy user, 2 GiB swap, UFW
+# (22, 80, 443 only), SSH hardening, and unattended upgrades. Postgres data is the named volume
+# food-os-pgdata on the root disk; no separate data disk is mounted (storage decision 2026-11-04).
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -9,8 +10,6 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-PGDATA_DEVICE="${PGDATA_DEVICE:-/dev/nvme1n1}"
-DATA_MOUNT=/home/ubuntu/docker/data
 APP_DIR=/home/ubuntu/docker
 DEPLOY_PUBLIC_KEY="${DEPLOY_PUBLIC_KEY:?set DEPLOY_PUBLIC_KEY to the public key of the deploy user}"
 
@@ -53,25 +52,10 @@ grep -qE '^/swapfile[[:space:]]' /etc/fstab || echo '/swapfile none swap sw 0 0'
 echo 'vm.swappiness=10' > /etc/sysctl.d/99-food-os-swap.conf
 sysctl -p /etc/sysctl.d/99-food-os-swap.conf >/dev/null
 
-# Data volume: format only when no filesystem exists, mount by UUID with nofail.
-if [ -b "$PGDATA_DEVICE" ]; then
-  if [ -z "$(blkid -o value -s TYPE "$PGDATA_DEVICE" 2>/dev/null || true)" ]; then
-    mkfs.ext4 -L pgdata "$PGDATA_DEVICE"
-  fi
-  uuid=$(blkid -o value -s UUID "$PGDATA_DEVICE")
-  mkdir -p "$DATA_MOUNT"
-  grep -q "UUID=$uuid " /etc/fstab || echo "UUID=$uuid $DATA_MOUNT ext4 defaults,nofail 0 2" >> /etc/fstab
-  mountpoint -q "$DATA_MOUNT" || mount "$DATA_MOUNT"
-else
-  echo "warning: $PGDATA_DEVICE not present; data volume not mounted" >&2
-fi
-
-# Project folder owned by deploy. Postgres data folder is owned by UID 999 (the postgres image user).
+# Project folder owned by deploy. Postgres data lives in the named volume food-os-pgdata (root disk),
+# so no host data directory is created here.
 install -d -o deploy -g deploy "$APP_DIR"
 chown -R deploy:deploy "$APP_DIR"
-if mountpoint -q "$DATA_MOUNT"; then
-  install -d -o 999 -g 999 -m 700 "$DATA_MOUNT/postgres"
-fi
 
 # UFW: only 22, 80, 443 inbound.
 ufw default deny incoming

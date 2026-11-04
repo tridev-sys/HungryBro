@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 
 mode="${1:?usage: caddy-data-backup.sh backup | check latest}"
 : "${BACKUP_TARGET:?set BACKUP_TARGET}"
-SCRATCH_ROOT="${BACKUP_SCRATCH:-/home/ubuntu/docker/data/backup-scratch}"
+SCRATCH_ROOT="${BACKUP_SCRATCH:-$PWD/backups-scratch}"
 VOLUME="${CADDY_VOLUME:-proxy-caddy-data}"
 mkdir -p "$SCRATCH_ROOT"
 work=$(mktemp -d "$SCRATCH_ROOT/caddy.XXXXXX")

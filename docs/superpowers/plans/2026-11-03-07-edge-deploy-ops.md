@@ -19,7 +19,7 @@ In:
 - (d) Per-container memory limits matching the tech-decision budget; Redis `maxmemory 256mb` with `allkeys-lru`.
 - (e) Backups: `pg_dump` to S3 with 14-day retention, systemd timers, restore script that loads into a scratch database and checks row counts against a manifest; monthly restore test.
 - (f) GitHub Actions: test, build, push to GHCR, SSH deploy by immutable `sha-` tag, health check, rollback to the previous tag on failure.
-- (g) EC2 bootstrap for Ubuntu: Docker, Compose plugin, 2 GiB swap, EBS data volume mounted at `/home/ubuntu/docker/data`, UFW allowing only 22, 80, 443.
+- (g) EC2 bootstrap for Ubuntu: Docker, Compose plugin, 2 GiB swap, UFW allowing only 22, 80, 443. No data disk (storage decision 2026-11-04).
 - (h) Idempotent seed script: four test restaurants (two in Indiranagar, two in HSR) with menus and dine-in tables.
 - (i) Playwright E2E suite with two specs: simultaneous dine-in sessions and a multi-merchant delivery auction.
 - (j) External uptime check on `/api/health` (free monitor, 5-minute interval), a CloudWatch instance alarm as backup, and the CloudWatch log driver.
@@ -48,8 +48,8 @@ Out:
   - Nonce-based CSP is deferred; `unsafe-inline` is the documented trade-off until then.
 - Client IP: Caddy overwrites `X-Real-IP` with the TCP peer address. The app reads `X-Real-IP` first and falls back to the rightmost `X-Forwarded-For` entry. It never trusts the leftmost entry. When Cloudflare is added, Caddy switches to `CF-Connecting-IP` in one place.
 - Production ports: only `proxy-caddy` (the shared proxy) publishes host ports, exactly `80` and `443`. `app`, `db`, and `redis` publish none in the prod override. `app` is on networks `shared` (external) and `backend`; `db` and `redis` are on `backend` only. Caddy obtains and renews Let's Encrypt certificates for `DOMAIN` automatically, using `ACME_EMAIL`; HTTP redirects to HTTPS.
-- Resource limits and volumes (tech decisions, binding): every service sets `cpus`, `mem_limit`, `mem_reservation`, `pids_limit`, a json-file log cap (`max-size` 10m, `max-file` 3), and `restart: unless-stopped`. Postgres data is a bind mount at `/home/ubuntu/docker/data/postgres`. Named volumes carry fixed names and labels (`food-os-redisdata`, `proxy-caddy-data`). Volumes are never removed by `docker compose down`.
-- Hardware (tech decisions, decision 4): `c7i.xlarge` (4 vCPU, 8 GiB RAM) in `ap-south-1`, Ubuntu LTS. Not c4 and not t3. EBS gp3 for all volumes: root volume 60 GiB; data volume 100 GiB mounted at `/home/ubuntu/docker/data`, with at least 20 GiB kept free there for `pg_dump` scratch.
+- Resource limits and volumes (tech decisions, binding): every service sets `cpus`, `mem_limit`, `mem_reservation`, `pids_limit`, a json-file log cap (`max-size` 10m, `max-file` 3), and `restart: unless-stopped`. Postgres data is the named volume `food-os-pgdata` on the root disk (storage decision 2026-11-04; supersedes the data-disk bind mount described below). Named volumes carry fixed names and labels (`food-os-redisdata`, `proxy-caddy-data`). Volumes are never removed by `docker compose down`.
+- Hardware (tech decisions, decision 4): `c7i.xlarge` (4 vCPU, 8 GiB RAM) in `ap-south-1`, Ubuntu LTS. Not c4 and not t3. EBS gp3 for all volumes: root volume 60 GiB; no data disk (storage decision 2026-11-04). At least 20 GiB kept free on the root volume for `pg_dump` scratch in `/home/ubuntu/docker/backups-scratch`.
 - Memory budget (`c7i.xlarge`, 8 GiB RAM):
 
   | Container | `mem_limit` | Note |
@@ -61,7 +61,7 @@ Out:
   | OS, Docker, page cache | about 4.5 GiB | Includes 2 GiB swap file |
 
 - Redis: `redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru`. Auction state is ephemeral; the database holds the record.
-- Persistent data: Postgres data on the 100 GiB EBS gp3 data volume mounted at `/home/ubuntu/docker/data` (container path `/var/lib/postgresql/data`; host path set by `PGDATA_DIR`, default `/home/ubuntu/docker/data/postgres`). Redis AOF in the named volume `redisdata`.
+- Persistent data: Postgres data in the named volume `food-os-pgdata` on the root EBS disk (container path `/var/lib/postgresql/data`; storage decision 2026-11-04, `PGDATA_DIR` removed). Redis AOF in the named volume `redisdata`.
 - Images: `ghcr.io/<owner>/food-os:sha-<40-hex-commit>`. Production never uses `latest`. GHCR owner must be lowercase.
 - Backups: nightly at 21:00 UTC (02:30 IST) to `s3://<BACKUP_BUCKET>/pg/`. Retention 14 days by S3 lifecycle rule on prefix `pg/`. Restore test on the 3rd of each month at 04:00 UTC. The `proxy-caddy-data` volume is archived weekly (Sundays 21:30 UTC) to `s3://<BACKUP_BUCKET>/caddy/` with the same 14-day rule (Task 6).
 - Migrations must be expand-only (no column drops or renames in the same release as a code change). Rollback to the previous image is only safe under that rule.
@@ -503,14 +503,14 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - Modify: `docker-compose.yml` (Plan 01 base): only the `redis` service `command`
 
 **Interfaces:**
-- Consumes: Plan 01 `docker-compose.yml` (`app`, `db`, `redis`, `pgdata`, `redisdata`, the `backend` and external `shared` networks, healthchecks); `proxy_server/create-shared-network.sh` (creates `shared`); `IMAGE_TAG`, `GHCR_OWNER`, `POSTGRES_PASSWORD`, `PGDATA_DIR` env (set in `/home/ubuntu/docker/.env`); `DOMAIN` and `ACME_EMAIL` env (set in the proxy's `.env`).
+- Consumes: Plan 01 `docker-compose.yml` (`app`, `db`, `redis`, `pgdata`, `redisdata`, the `backend` and external `shared` networks, healthchecks); `proxy_server/create-shared-network.sh` (creates `shared`); `IMAGE_TAG`, `GHCR_OWNER`, `POSTGRES_PASSWORD` env (set in `/home/ubuntu/docker/.env`); `DOMAIN` and `ACME_EMAIL` env (set in the proxy's `.env`).
 - Produces:
   - `proxy_server/Caddyfile`: global block `{ email {$ACME_EMAIL} }`; one site block for `{$DOMAIN}` with `encode zstd gzip`, `header { -Server }`, `reverse_proxy food-os-app:3000` with `header_up X-Real-IP {remote_host}`, and access logs to stdout. Automatic Let's Encrypt TLS and the HTTP-to-HTTPS redirect come from Caddy's defaults. Adding an app means adding one site block.
   - `proxy_server/docker-compose.yml` (run from `proxy_server/`): service `caddy`, `container_name: proxy-caddy`, `image: caddy:2-alpine`, `ports: ["80:80", "443:443"]`, mounts `./Caddyfile:/etc/caddy/Caddyfile:ro` and the named volumes `caddy_data` and `caddy_config`, env `DOMAIN` and `ACME_EMAIL` (both required via `${...:?}`), `restart: unless-stopped`, `networks: [shared]`, caps `cpus: 0.5`, `mem_limit: 128m`, `mem_reservation: 64m`, `pids_limit: 128` (tech decisions require both keys but give no Caddy values; these two are proposed), json-file log cap (`max-size` 10m, `max-file` 3). Top level: `networks: { shared: { external: true } }`.
     - Volume `caddy_data`: `name: proxy-caddy-data`, labels `app: food-os`, `purpose: tls-certificates`. It holds Let's Encrypt certificates and ACME account keys; losing it forces re-issuance, so it is part of the backup set (backup mechanism to be confirmed; see Unresolved Gaps). `caddy_config` is labelled `purpose: caddy-config`.
   - `docker-compose.prod.yml` override (run as `docker compose -f docker-compose.yml -f docker-compose.prod.yml`):
     - `app`: `image: ghcr.io/${GHCR_OWNER}/food-os:${IMAGE_TAG:?}`, `build: !reset null`, `ports: !reset []`, `expose: ["3000"]`, `cpus: 1.5`, `mem_limit: 1g`, `mem_reservation: 512m`, `pids_limit: 512`, `networks: [shared, backend]`, `restart: unless-stopped`.
-    - `db`: `ports: !reset []` (the base's `127.0.0.1:5432` binding is removed; prod publishes nothing), `volumes: !override ["${PGDATA_DIR:-/home/ubuntu/docker/data/postgres}:/var/lib/postgresql/data"]` (bind mount to `/home/ubuntu/docker/data/postgres` on the data volume; the base's `food-os-pgdata` named volume is not used in prod), `cpus: 2.0`, `mem_limit: 2g`, `mem_reservation: 1g`, `shm_size: 256m`, `pids_limit: 256`, `networks: [backend]`, `restart: unless-stopped`.
+    - `db`: `ports: !reset []` (the base's `127.0.0.1:5432` binding is removed; prod publishes nothing), `volumes: !override ["pgdata:/var/lib/postgresql/data"]` (named volume `food-os-pgdata` on the root disk, declared in the prod file with the base's name and labels; storage decision 2026-11-04), `cpus: 2.0`, `mem_limit: 2g`, `mem_reservation: 1g`, `shm_size: 256m`, `pids_limit: 256`, `networks: [backend]`, `restart: unless-stopped`.
     - `redis`: `ports: !reset []`, `cpus: 0.5`, `mem_limit: 320m`, `mem_reservation: 128m`, `pids_limit: 128`, `networks: [backend]`, `restart: unless-stopped`.
     - No `caddy` service here (the proxy is its own stack), and no `depends_on` across stacks.
   - Base `redis` `command`: `redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru`.
@@ -522,7 +522,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 # scripts/tests/prod-compose.test.sh
 set -euo pipefail
 export IMAGE_TAG=sha-0000000000000000000000000000000000000000 GHCR_OWNER=example DOMAIN=test.example.com \
-  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test
+  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me
 cfg=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json)
 pcfg=$(docker compose -f proxy_server/docker-compose.yml config --format json)
 j() { echo "$cfg" | jq -e "$1" >/dev/null || { echo "FAIL: $1" >&2; exit 1; }; }
@@ -543,8 +543,8 @@ j '(.services.db.cpus | tonumber) == 2.0 and (.services.db.mem_limit | tonumber)
 j '(.services.redis.cpus | tonumber) == 0.5 and (.services.redis.mem_limit | tonumber) == 335544320'
 p '(.services.caddy.cpus | tonumber) == 0.5 and (.services.caddy.mem_limit | tonumber) == 134217728'
 
-# Postgres data is a bind mount on the data volume, not a named volume
-j '[.services.db.volumes[] | select(.target == "/var/lib/postgresql/data") | .type] == ["bind"]'
+# Postgres data is the named volume food-os-pgdata on the root disk (storage decision 2026-11-04)
+j '[.services.db.volumes[] | select(.target == "/var/lib/postgresql/data") | .type, .source] == ["volume", "pgdata"]'
 
 # Redis cap and eviction
 j '(.services.redis.command | if type == "array" then join(" ") else . end) | contains("--maxmemory 256mb") and contains("--maxmemory-policy allkeys-lru")'
@@ -595,9 +595,9 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - Test: `scripts/verify-host.sh` is the test (run on the instance)
 
 **Interfaces:**
-- Consumes: Ubuntu LTS on `c7i.xlarge`, `ap-south-1`; root gp3 volume 60 GiB; an attached EBS gp3 data volume of 100 GiB (device `PGDATA_DEVICE`, default `/dev/nvme1n1`).
+- Consumes: Ubuntu LTS on `c7i.xlarge`, `ap-south-1`; root gp3 volume 60 GiB; no data disk (the 100 GiB data disk is detached and not used, storage decision 2026-11-04).
 - Produces:
-  - `scripts/ec2-bootstrap.sh` (run once as root, safe to re-run). Idempotent steps: Docker Engine and Compose plugin from Docker's apt repo; `deploy` user (docker group, key-only login, public key from `DEPLOY_PUBLIC_KEY`); 2 GiB swap at `/swapfile` with `vm.swappiness=10`; format `PGDATA_DEVICE` only if `blkid` shows no filesystem, mount at `/home/ubuntu/docker/data` by UUID in `/etc/fstab` with `nofail`; `/home/ubuntu/docker` owned by `deploy`; UFW: default deny incoming, allow `22/tcp`, `80/tcp`, `443/tcp`, enable; `unattended-upgrades` enabled.
+  - `scripts/ec2-bootstrap.sh` (run once as root, safe to re-run). Idempotent steps: Docker Engine and Compose plugin from Docker's apt repo; `deploy` user (docker group, key-only login, public key from `DEPLOY_PUBLIC_KEY`); 2 GiB swap at `/swapfile` with `vm.swappiness=10`; `/home/ubuntu/docker` owned by `deploy`; UFW: default deny incoming, allow `22/tcp`, `80/tcp`, `443/tcp`, enable; `unattended-upgrades` enabled.
   - `scripts/verify-host.sh` exits 0 only when all checks pass; prints one line per check.
 
 - [ ] **Step 1: Write the verification script first (this is the failing test)**
@@ -606,11 +606,11 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 1. `ufw status | grep -q "Status: active"`.
 2. Publicly listening TCP ports are exactly `22 80 443` (Review Focus 4): `ss -tln | awk 'NR>1 {print $4}' | grep -E '^(0\.0\.0\.0|\[::\]|\*):' | sed 's/.*://' | sort -u` must equal the three numbers. Loopback-bound Docker ports are excluded by design; the shared proxy's 80 and 443 are the only Docker-published ports.
 3. `swapon --show=SIZE --bytes --noheadings` total is at least `2147483648`.
-4. `findmnt -n -o SOURCE /home/ubuntu/docker/data` succeeds and the source is not the root device.
+4. `docker volume inspect food-os-pgdata` succeeds (storage decision 2026-11-04; no data disk).
 5. `docker compose version` reports v2.24.4 or later.
 6. `id deploy` shows `docker` group membership; `sudo -u deploy docker ps` exits 0.
 7. `sshd -T | grep -q '^passwordauthentication no$'`.
-8. `df --output=avail -B1G /home/ubuntu/docker/data | tail -1` is at least `20` (pg_dump scratch headroom, Global Constraints).
+8. `df --output=avail -B1G /home/ubuntu/docker | tail -1` is at least `20` (pg_dump scratch on the root disk, Global Constraints).
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -622,7 +622,7 @@ Expected: exit 1, with at least checks 1, 3, 4, and 6 printing `FAIL`.
 - `set -euo pipefail`; refuse to run unless `id -u` is 0.
 - Use the official Docker apt repository (`download.docker.com/linux/ubuntu`), packages `docker-ce docker-ce-cli containerd.io docker-compose-plugin`.
 - Swap: create `/swapfile` with `fallocate -l 2G` only if absent; `chmod 600`; `mkswap`; `swapon`; append to `/etc/fstab` only if the line is missing.
-- EBS: if `blkid "$PGDATA_DEVICE"` prints nothing, run `mkfs.ext4 -L pgdata "$PGDATA_DEVICE"`; mount point `/home/ubuntu/docker/data`; add the fstab line by `UUID=` with `nofail` only if absent.
+- EBS: none. No data disk is mounted (storage decision 2026-11-04).
 - UFW: `ufw default deny incoming`, `ufw default allow outgoing`, `ufw allow 22/tcp`, `ufw allow 80/tcp`, `ufw allow 443/tcp`, `ufw --force enable`.
 - SSH: write `/etc/ssh/sshd_config.d/90-food-os.conf` with `PasswordAuthentication no` and `PermitRootLogin no`; `systemctl reload ssh`.
 - Instance profile (set in AWS, not in the script; document here): IAM role with `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`, `logs:DescribeLogStreams` on `/food-os/*`, and `s3:PutObject`, `s3:GetObject`, `s3:ListBucket` on `<BACKUP_BUCKET>` (`pg/*`). Security group inbound: 22 from the owner's IP only; 80 and 443 from anywhere.
@@ -724,7 +724,7 @@ Expected: FAIL, "scripts/backup-pg.sh: No such file or directory".
 
 - [ ] **Step 3: Implement**
 
-- Follow the Interfaces exactly. Use `set -euo pipefail`, quote every variable, and write dumps under `mktemp -d` inside `BACKUP_SCRATCH` (default `/home/ubuntu/docker/data/backup-scratch`, on the data volume, not the root volume) and remove it on exit with `trap`. Before dumping, refuse to run when less than `MIN_FREE_GIB` (default `20`) GiB is free on that filesystem, keeping the pg_dump headroom from Global Constraints. Tests set `MIN_FREE_GIB=0`.
+- Follow the Interfaces exactly. Use `set -euo pipefail`, quote every variable, and write dumps under `mktemp -d` inside `BACKUP_SCRATCH` (default `backups-scratch/` in the repo, on the root volume) and remove it on exit with `trap`. Before dumping, refuse to run when less than `MIN_FREE_GIB` (default `20`) GiB is free on that filesystem, keeping the pg_dump headroom from Global Constraints. Tests set `MIN_FREE_GIB=0`.
 - `BACKUP_TARGET=file://` is accepted only so the test can run without AWS; the script refuses `file://` when `NODE_ENV=production` is set in the environment.
 - `restore-check.sh latest` on S3 uses `aws s3 ls` sorted by key and picks the last `*.dump`.
 - Apply the lifecycle rule once: `aws s3api put-bucket-lifecycle-configuration --bucket "$BUCKET" --lifecycle-configuration file://deploy/s3-lifecycle.json`. Verify: `aws s3api get-bucket-lifecycle-configuration --bucket "$BUCKET"` shows `Days: 14`.
@@ -755,7 +755,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - Test: `scripts/tests/rollback-drill.sh` (run on the instance)
 
 **Interfaces:**
-- Consumes: `docker-compose.yml` and `docker-compose.prod.yml` on the host at `/home/ubuntu/docker/`; the shared proxy (`proxy_server/`, run from `/home/ubuntu/docker/proxy_server/`, started separately and not by `deploy.sh`) must already be up, and the external `shared` network must exist; `/home/ubuntu/docker/.env` with `IMAGE_TAG`, `GHCR_OWNER`, `DOMAIN`, `POSTGRES_PASSWORD`, `PGDATA_DIR`; GitHub secrets `EC2_HOST`, `EC2_USER` (`deploy`), `EC2_SSH_KEY`, `DOMAIN`; host-side GHCR pull token in `/home/ubuntu/docker/.env` as `GHCR_TOKEN` with `read:packages` (login run by `deploy.sh`).
+- Consumes: `docker-compose.yml` and `docker-compose.prod.yml` on the host at `/home/ubuntu/docker/`; the shared proxy (`proxy_server/`, run from `/home/ubuntu/docker/proxy_server/`, started separately and not by `deploy.sh`) must already be up, and the external `shared` network must exist; `/home/ubuntu/docker/.env` with `IMAGE_TAG`, `GHCR_OWNER`, `DOMAIN`, `POSTGRES_PASSWORD`; GitHub secrets `EC2_HOST`, `EC2_USER` (`deploy`), `EC2_SSH_KEY`, `DOMAIN`; host-side GHCR pull token in `/home/ubuntu/docker/.env` as `GHCR_TOKEN` with `read:packages` (login run by `deploy.sh`).
 - Produces:
   - Workflow `deploy.yml`, triggered on push to `main`, with concurrency group `deploy-prod` and `cancel-in-progress: false`. Jobs:
     1. `test`: job `container: node:22-alpine`, so Node runs in a container; `npm ci`, `npm run typecheck`, `npm test` with service containers `postgis/postgis:16-3.4` (env `POSTGRES_PASSWORD=ci`, `POSTGRES_USER=food`, `POSTGRES_DB=food_os`) and `redis:7-alpine`; `DATABASE_URL` and `REDIS_URL` point at them.
@@ -867,7 +867,7 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 # scripts/tests/logging.test.sh
 set -euo pipefail
 export IMAGE_TAG=sha-0000000000000000000000000000000000000000 GHCR_OWNER=example DOMAIN=test.example.com \
-  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test
+  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me
 cfg=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json)
 pcfg=$(docker compose -f proxy_server/docker-compose.yml config --format json)
 for svc in app db redis; do
@@ -1190,7 +1190,7 @@ Capacitor is item (k). It is documented here so the path is clear, and it is not
 
 - `npm test` (containerised, per Global Constraints) passes all suites, including rate limiter (bucket, Redis store, keys, guard), HTTP (body, security), seed, and the Plan 01 suites.
 - `bash scripts/tests/prod-compose.test.sh` prints `prod compose OK`: app, db, and redis publish no host ports; across the stack only `proxy-caddy` publishes, exactly 80 and 443; CPU and memory caps, the bind-mounted Postgres data, and the Redis cap match the budget.
-- `bash scripts/verify-host.sh` exits 0 on the instance: publicly listening ports are exactly 22, 80, 443; 2 GiB swap is active; `/home/ubuntu/docker/data` is a separate mount with at least 20 GiB free; `deploy` can run Docker.
+- `bash scripts/verify-host.sh` exits 0 on the instance: publicly listening ports are exactly 22, 80, 443; 2 GiB swap is active; the `food-os-pgdata` volume exists and the root disk has at least 20 GiB free for `backups-scratch`; `deploy` can run Docker.
 - `bash scripts/tests/backup-restore.test.sh` prints `backup-restore OK`; the S3 lifecycle rules show 14 days for `pg/` and `caddy/`; all three systemd timers are listed and enabled; `scripts/caddy-data-backup.sh check latest` prints `caddy-data check OK`.
 - The `deploy` workflow runs green on `main`, and `curl -fsS https://<DOMAIN>/api/health` returns `{"ok":true}` from the EC2 instance.
 - `bash scripts/tests/rollback-drill.sh` prints `rollback drill OK`.

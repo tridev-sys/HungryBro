@@ -2,7 +2,8 @@
 # Nightly logical backup of food_os. Dump and row counts come from ONE exported snapshot, so the
 # manifest matches the dump exactly even while the app is writing.
 # Env: BACKUP_TARGET (s3://bucket/prefix, or file:///dir for tests only), BACKUP_DB_PASSWORD,
-#      BACKUP_SCRATCH (default /home/ubuntu/docker/data/backup-scratch), MIN_FREE_GIB (default 20).
+#      BACKUP_SCRATCH (default $REPO/backups-scratch on the root disk), MIN_FREE_GIB (default 20).
+#      The script refuses to run when less than MIN_FREE_GIB GiB is free in BACKUP_SCRATCH.
 # Runs from the repository root, using the compose project in scope (COMPOSE_PROJECT_NAME / COMPOSE_FILE).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -10,7 +11,7 @@ cd "$(dirname "$0")/.."
 : "${BACKUP_TARGET:?set BACKUP_TARGET (s3://bucket/prefix)}"
 : "${BACKUP_DB_PASSWORD:?set BACKUP_DB_PASSWORD}"
 MIN_FREE_GIB="${MIN_FREE_GIB:-20}"
-SCRATCH_ROOT="${BACKUP_SCRATCH:-/home/ubuntu/docker/data/backup-scratch}"
+SCRATCH_ROOT="${BACKUP_SCRATCH:-$PWD/backups-scratch}"
 COUNT_TABLES=(restaurant_nodes menu_items menu_categories dining_tables tabletop_sessions kds_tickets mesh_food_auctions verified_customer_ratings)
 
 if [ "${NODE_ENV:-}" = production ] && [[ "$BACKUP_TARGET" == file://* ]]; then

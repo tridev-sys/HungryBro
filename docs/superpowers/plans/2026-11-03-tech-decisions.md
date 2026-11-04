@@ -15,7 +15,7 @@
 
 ## Project location (binding, owner decision)
 
-- Everything the project needs lives under `/home/ubuntu/docker` or its subfolders: source, plans, proxy (`proxy_server/`), compose files, deploy scripts, backups, and the database data disk (`data/`, mounted from the attached 100 GB volume).
+- Everything the project needs lives under `/home/ubuntu/docker` or its subfolders: source, plans, proxy (`proxy_server/`), compose files, deploy scripts, backups, and Postgres data in the named Docker volume `food-os-pgdata` on the root disk (storage decision 2026-11-04).
 - Nothing project-related goes in `/opt`, `/mnt`, `/srv`, or other system folders.
 - **The host runs Docker only.** No Node.js, npm, or other language runtime is installed on the host, except the temporary Node exception recorded in CLAUDE.md (`/home/ubuntu/.local/node`, to be removed once tests run in containers). Every install, build, test, and run command executes inside a container, for example `docker run --rm -v /home/ubuntu/docker:/app -w /app node:22-alpine npm test`, or a compose service. Only Docker and OS packages are installed on the host.
 
@@ -71,8 +71,8 @@
   - Note: c4 is a previous-generation instance family. Resizing to c7i (current generation) is planned by the owner. A `c7i.xlarge` has 4 vCPU and 8 GiB RAM, so the memory budget above still holds.
 - Storage (EBS gp3 for all volumes):
   - Root volume: 60 GiB. Ubuntu, Docker, the three images, and build cache. Prune unused images and build cache monthly.
-  - Data volume: 100 GiB, mounted on the host at `/home/ubuntu/docker/data`. Postgres data lives in `/home/ubuntu/docker/data/postgres`, which the `db` container mounts as `/var/lib/postgresql/data`. The folder is owned by UID 999 (the Postgres image user). Postgres data for the pilot is expected to stay under 10 GiB; the rest is headroom. Snapshot this volume weekly.
-  - Backup scratch space: `pg_dump` output is written to `/home/ubuntu/docker/data/backup-scratch` before upload to S3, so keep at least 20 GiB free on the data volume.
+  - Data volume: none. The 100 GiB data disk is being detached and is not used (storage decision 2026-11-04). Postgres data is in the named volume `food-os-pgdata` on the root disk.
+  - Backup scratch space: `pg_dump` output is written to `backups-scratch/` in the repo on the root disk before upload to S3. `scripts/backup-pg.sh` refuses to run with less than 20 GiB free there (storage decision 2026-11-04).
 - **Shared reverse proxy (owner decision):**
   - Folder `~/docker/proxy_server/` holds one Caddy 2 proxy (`caddy:2-alpine`) with its own `docker-compose.yml`, `Caddyfile`, and `create-shared-network.sh`. Caddy obtains and renews Let's Encrypt certificates automatically for `DOMAIN`, with `ACME_EMAIL` for expiry notices.
   - The proxy is the only container that publishes host ports, and only `80` and `443`. HTTP redirects to HTTPS. Nothing else on the host is reachable from outside.
@@ -86,7 +86,7 @@
   - Every service that can hold state has `restart: unless-stopped`.
 - **Docker volumes (binding):**
   - Named volumes have fixed names and labels (`app=food-os`, a `purpose` label): `food-os-pgdata` (Postgres data), `food-os-redisdata` (Redis append-only file), `proxy caddy_data` (Let's Encrypt certificates and account keys; losing it forces re-issuance, so it is backed up).
-  - Production replaces the Postgres named volume with a bind mount to `/home/ubuntu/docker/data/postgres` (decision on storage above).
+  - Production uses the same Postgres named volume `food-os-pgdata` as the base file (storage decision 2026-11-04; the earlier bind-mount plan is withdrawn).
   - Volumes are never removed by `docker compose down`; removal needs `-v` and an explicit operator step. Backups run before any volume-affecting change.
 - Docker Compose runs `app`, `db`, and `redis`.
 - Persistent data on a separate EBS gp3 volume.
@@ -144,3 +144,10 @@ These decisions let the build continue while vendor answers and owner items are 
 ## Evidence notes (2026-11-04)
 
 - The Round 1 "mismatch 1" (Cashfree timestamp unit) and the Round 1 Deepgram "REST in repo" note are stale. The code now uses milliseconds for Cashfree and streaming for Deepgram. The verification doc's Round 2 status records the fix (d411f82); the production value stays NOT VERIFIED until a live webhook is checked.
+
+## Storage decision 2026-11-04 (owner, binding)
+
+- Postgres runs on the root EBS disk. Production and dev both use the named Docker volume `food-os-pgdata` (labels `app=food-os`, `purpose=postgres-data`), stored under `/var/lib/docker`. The production compose file declares the same volume and does not use a bind mount.
+- The 100 GB data disk is being detached and is not used. No file may depend on `/home/ubuntu/docker/data`. `PGDATA_DIR` is removed. `scripts/ec2-bootstrap.sh` no longer mounts a data disk. `scripts/verify-host.sh` checks the named volume and the root free space instead.
+- Backup scratch space is `backups-scratch/` in the repo on the root disk (git-ignored). `scripts/backup-pg.sh` checks free space before writing and refuses to run with less than 20 GiB free (`MIN_FREE_GIB`, default 20, the owner's rule).
+- Moving Postgres data to another disk later requires a verified backup first, then a restore check on the new location.

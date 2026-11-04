@@ -10,7 +10,7 @@ import path from 'node:path';
 // Runtime values come from environment variables or DNS names set at deploy time.
 //
 // Only git-tracked files are scanned (git ls-files). The guard never walks the directory tree, so
-// untracked or unreadable paths (for example the root-owned data disk mounted at data/) are never
+// untracked or unreadable paths (for example a root-owned folder at data/) are never
 // touched.
 
 const ROOT = path.resolve(__dirname, '..', '..');

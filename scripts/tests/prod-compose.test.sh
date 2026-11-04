@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 export IMAGE_TAG=sha-0000000000000000000000000000000000000000 GHCR_OWNER=example DOMAIN=test.example.com \
-  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me APP_DB_PASSWORD=change-me PGDATA_DIR=/tmp/pgdata-test \
+  ACME_EMAIL=ops@example.com POSTGRES_PASSWORD=change-me APP_DB_PASSWORD=change-me \
   ADMIN_DATABASE_URL=postgres://food:change-me@db:5432/food_os
 cfg=$(docker compose -f docker-compose.yml -f docker-compose.prod.yml config --format json)
 pcfg=$(docker compose -f proxy_server/docker-compose.yml config --format json)
@@ -25,8 +25,29 @@ j '(.services.db.cpus | tonumber) == 2.0 and (.services.db.mem_limit | tonumber)
 j '(.services.redis.cpus | tonumber) == 0.5 and (.services.redis.mem_limit | tonumber) == 335544320'
 p '(.services.caddy.cpus | tonumber) == 0.5 and (.services.caddy.mem_limit | tonumber) == 134217728'
 
-# Postgres data is a bind mount on the data volume, not a named volume
-j '[.services.db.volumes[] | select(.target == "/var/lib/postgresql/data") | .type] == ["bind"]'
+# Storage decision 2026-11-04: production Postgres is the named volume food-os-pgdata on the root disk.
+# The 100 GB data disk is detached and no production file may depend on /home/ubuntu/docker/data.
+j '[.services.db.volumes[] | select(.target == "/var/lib/postgresql/data") | .type, .source] == ["volume", "pgdata"]'
+j '.volumes.pgdata.name == "food-os-pgdata"'
+j '(.volumes.pgdata.labels.app == "food-os") and (.volumes.pgdata.labels.purpose == "postgres-data")'
+if grep -rn --exclude-dir=tests -e '/home/ubuntu/docker/data' -e 'PGDATA_DIR' \
+    docker-compose.yml docker-compose.prod.yml .env.example README.md deploy scripts proxy_server >&2; then
+  echo "FAIL: production files still reference the data disk or PGDATA_DIR (listed above)" >&2
+  exit 1
+fi
+
+# Backup scratch lives on the root disk inside the repo and refuses to run below the free-space floor.
+grep -q 'SCRATCH_ROOT="${BACKUP_SCRATCH:-$PWD/backups-scratch}"' scripts/backup-pg.sh \
+  || { echo "FAIL: backup-pg.sh default scratch is not backups-scratch" >&2; exit 1; }
+scratch_t=$(mktemp -d)
+set +e
+out=$(BACKUP_TARGET="file://$scratch_t/target" BACKUP_DB_PASSWORD=change-me BACKUP_SCRATCH="$scratch_t/scratch" \
+  MIN_FREE_GIB=999999 bash scripts/backup-pg.sh 2>&1)
+rc=$?
+set -e
+rm -rf "$scratch_t"
+[ "$rc" -ne 0 ] && echo "$out" | grep -q 'need 999999' \
+  || { echo "FAIL: backup-pg.sh did not refuse below the free-space threshold: $out" >&2; exit 1; }
 
 # Redis cap and eviction
 j '(.services.redis.command | if type == "array" then join(" ") else . end) | contains("--maxmemory 256mb") and contains("--maxmemory-policy allkeys-lru")'

@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 src="${1:?usage: restore-check.sh <dump path | latest>}"
 : "${BACKUP_DB_PASSWORD:?set BACKUP_DB_PASSWORD}"
 : "${FOOD_ADMIN_DB_PASSWORD:?set FOOD_ADMIN_DB_PASSWORD}"
-SCRATCH_ROOT="${BACKUP_SCRATCH:-/home/ubuntu/docker/data/backup-scratch}"
+SCRATCH_ROOT="${BACKUP_SCRATCH:-$PWD/backups-scratch}"
 DB=food_os_restore_check
 REMOTE_DUMP=/tmp/food_os_restore.dump
 REMOTE_LIST=/tmp/food_os_restore.list

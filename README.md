@@ -120,7 +120,7 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`:
 4. **deploy:** runs `/home/ubuntu/docker/deploy.sh sha-<commit>` over SSH on the host. The script is installed from `deploy/deploy.sh`. It pulls the image, runs migrations, starts the app, and checks health. On failure it rolls back to the previous tag.
 5. **public health check:** requests the public `/api/health` endpoint.
 
-Production uses `docker-compose.yml` with `docker-compose.prod.yml`. In production, no service publishes a host port. Postgres data is stored under `data/postgres`. Named volumes are `food-os-pgdata` and `food-os-redisdata`, and Caddy's data volume is also backed up. Every service has CPU, memory and PID limits and bounded JSON logs.
+Production uses `docker-compose.yml` with `docker-compose.prod.yml`. In production, no service publishes a host port. Postgres data is the named volume `food-os-pgdata` on the root disk (no separate data disk; storage decision 2026-11-04). Redis uses `food-os-redisdata`, and Caddy's data volume is also backed up. Backup scratch is `backups-scratch/` on the root disk and needs at least 20 GB free. Every service has CPU, memory and PID limits and bounded JSON logs.
 
 No IP address is committed to this repository. The EC2 instance has no Elastic IP, so its public and private addresses change on every stop/start. After each start, check the current public IP in the console or with IMDSv2, then update the DNS A record for `DOMAIN` and the GitHub secret `EC2_HOST`. The deploy reads `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY` and `DOMAIN` from GitHub secrets at run time. `tests/config/no-hardcoded-ip.test.ts` fails if an IPv4 address other than loopback or an RFC 5737 documentation address is committed.
 
