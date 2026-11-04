@@ -1,17 +1,46 @@
 import { encryptCredentials, loadPosKey } from '../../lib/pos/credentials';
-import type pg from 'pg';
+import pg from 'pg';
 import { randomUUID, randomInt } from 'node:crypto';
 
+const CLUSTER_LOCK_KEY = 'food_os_test_cluster_ddl';
+
+// Runs fn while holding a lock shared by every test run on this server. Roles and role memberships
+// are cluster-wide catalogs, so two runs writing them at once fail with "tuple concurrently updated".
+// pg_advisory_lock is scoped to the database it is taken in, and each run has its own database, so
+// the lock is taken in the maintenance database 'postgres', which all runs share.
+export async function withClusterLock<T>(fn: () => Promise<T>): Promise<T> {
+  const raw = process.env.ADMIN_DATABASE_URL;
+  if (!raw) throw new Error('ADMIN_DATABASE_URL is not set');
+  const url = new URL(raw);
+  url.pathname = '/postgres';
+  const lock = new pg.Client({ connectionString: url.toString() });
+  await lock.connect();
+  try {
+    await lock.query('SELECT pg_advisory_lock(hashtext($1))', [CLUSTER_LOCK_KEY]);
+    try {
+      return await fn();
+    } finally {
+      await lock.query('SELECT pg_advisory_unlock(hashtext($1))', [CLUSTER_LOCK_KEY]);
+    }
+  } finally {
+    await lock.end();
+  }
+}
+
 // Sets food_app_login's password to the one in APP_DATABASE_URL, so the runtime pool can connect
-// in tests. Test database only. Takes an advisory lock because several test files call it in parallel.
+// in tests. Test database only. The role DDL runs under withClusterLock, so concurrent runs
+// (each with its own database) cannot interleave their writes to the cluster catalogs.
 export async function ensureAppLogin(admin: pg.Pool): Promise<void> {
   const raw = process.env.APP_DATABASE_URL;
   if (!raw) throw new Error('APP_DATABASE_URL is not set');
   const password = decodeURIComponent(new URL(raw).password);
+  await withClusterLock(() => applyAppLogin(admin, password));
+}
+
+async function applyAppLogin(admin: pg.Pool, password: string): Promise<void> {
   const c = await admin.connect();
   try {
     await c.query('BEGIN');
-    await c.query(`SELECT pg_advisory_xact_lock(hashtext('food_app_login_test'))`);
     await c.query(`DO $$ BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'food_app_login') THEN
         CREATE ROLE food_app_login LOGIN;
