@@ -14,7 +14,7 @@
 
 In:
 - Phone normalization to `+91` E.164 (Task 2).
-- OTP issue and verify: 6 digits, 5-minute expiry, 5 verify attempts per challenge, single use, 3 challenges per phone per hour, MSG91 adapter, dev fixed-code fake (Task 3).
+- OTP issue and verify: 6 digits, 5-minute expiry, 5 verify attempts per challenge, single use, 3 challenges per phone per hour, email SMTP adapter by default (decision 2026-11-04), optional MSG91 adapter, dev fixed-code fake (Task 3).
 - Session cookie with `role` claim, HS256 JWT, 30-day diner and 12-hour staff expiry (Task 4).
 - Route 4: `app/auth/login/page.tsx` and `app/profile/settings/page.tsx` with phone entry, OTP entry, saved VPA list, GSTIN (Tasks 5 and 7).
 - GSTIN (15-character standard pattern), FSSAI (14 digits), VPA (`name@bank`) validators; GST invoice breakdown reusing Plan 01 `splitGst` (Task 6).
@@ -32,7 +32,15 @@ Out (roadmap or later plans):
 - Payment-state changes driven by webhooks. Plan 06 consumes the verified event; this plan only verifies and records it.
 - HTTP token-bucket rate limiting middleware (Plan 07). The per-phone OTP limit (3 challenges per hour) is in this plan.
 - Where a diner's declared allergens are persisted. This plan's filter takes them as an argument.
-- WhatsApp OTP channel. The md mentions it; tech decisions specify MSG91 SMS.
+- WhatsApp OTP channel. The md mentions it; tech decisions specify MSG91 SMS. **Superseded by decision 2026-11-04 below:** no paid SMS or WhatsApp gateway for dev or pilot.
+
+**Decision 2026-11-04 (owner, binding): email OTP and TOTP 2FA. Planned; not yet built as tasks.**
+- No paid SMS or WhatsApp gateway. The default OTP channel is a 6-digit code sent by email through free SMTP, using `nodemailer`. Keep the same OTP abstraction: `OtpProvider` gets an email implementation (provider name `smtp`) next to `dev` and the optional `msg91`. `OTP_PROVIDER` selects it (`smtp`, `msg91`, or `dev`). The OTP rules in Global Constraints (6 digits, 300 s, 5 attempts, single use, HMAC-only storage, 3 per hour) apply unchanged to every channel.
+- Phone and email sign-in both send the code by email. Engineering choice, recorded here: the phone sign-in form also takes an email address, and the code goes to that address. **OWNER TO CONFIRM:** how a phone-only diner should receive the code in the pilot (this is a product flow, not an engineering choice).
+- Storage gap (engineering): `otp_challenges` is keyed by `phone_e164`, and migration `004` is applied and cannot change. Email challenges need an identifier column. Engineering will add it in planned migration `011_totp_2fa` (or in a separate numbered migration if the owner prefers), and this plan does not edit `004`.
+- Two-factor authentication: standard TOTP (RFC 6238) for authenticator apps, with a set of single-use recovery codes shown once at enrolment and stored only as hashes. TOTP secrets are encrypted at rest with AES-256-GCM, with the key in an environment variable (name `TOTP_ENCRYPTION_KEY`; never logged). Planned as migration `011_totp_2fa`. It is a new task set, not a change to Tasks 1 to 11.
+- New environment variable names (values are never written in plans): `OTP_PROVIDER` gains `smtp`; `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`; `TOTP_ENCRYPTION_KEY`. Tests use an injected transport, never a real mail server.
+- The MSG91 wording in Tasks 1 to 3 is historical. MSG91 remains an optional provider behind the same abstraction.
 
 Open items (do not block this plan, must be resolved before pilot, see Acceptance):
 - The 2-second rating window is the spec's number. It is very tight for a human. The owner should confirm it.
@@ -50,7 +58,7 @@ Open items (do not block this plan, must be resolved before pilot, see Acceptanc
 - Webhooks: read the body as text first; verify the HMAC over that exact string; only then parse JSON. Compare with `constantTimeEqual`, never `===`.
 - Ratings: integer 1 to 5; tags from `RATING_TAGS` only; the 2-second window is measured on the database clock (`NOW()`), not the app clock. The database insert policy (migration `004`) is authoritative; the app check in Task 9 runs first as a fast path.
 - Migration `004` is append-only. Never edit `001`, `002`, or `003`.
-- Environment variables introduced here: `AUTH_JWT_SECRET` (32+ characters), `OTP_HMAC_KEY` (16+ characters), `OTP_PROVIDER` (`msg91` or `dev`), `MSG91_AUTH_KEY`, `MSG91_TEMPLATE_ID`, `RAZORPAY_WEBHOOK_SECRET`, `CASHFREE_WEBHOOK_SECRET`. Tests that need them set them in `beforeAll`.
+- Environment variables introduced here: `AUTH_JWT_SECRET` (32+ characters), `OTP_HMAC_KEY` (16+ characters), `OTP_PROVIDER` (`smtp`, `msg91` or `dev`; `smtp` is the default outside tests, decision 2026-11-04), `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (decision 2026-11-04), `MSG91_AUTH_KEY`, `MSG91_TEMPLATE_ID` (optional provider only), `RAZORPAY_WEBHOOK_SECRET`, `CASHFREE_WEBHOOK_SECRET`. The original `OTP_PROVIDER` value list `msg91` or `dev` is superseded by the 2026-11-04 decision. Tests that need them set them in `beforeAll`.
 - Tests use real PostGIS via `DATABASE_URL`. No database mocks. External HTTP (MSG91) is tested with an injected `fetch` stub.
 - Money uses `round2` and Plan 01 `gstOn` and `splitGst`. No new money math.
 
@@ -515,10 +523,11 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - Consumes: `normalizeIndianMobile` (Task 2); `getPool`, `asRole` (Plan 01); `otp_challenges`, `app_lookup_user_by_phone`, `app_create_user_after_otp` (Task 1); `UserRole` (`types/food-os.ts`, Plan 01).
 - Produces:
   - `constantTimeEqual(a: string, b: string): boolean` (`lib/security/timing.ts`). Returns `false` for unequal lengths; otherwise uses `crypto.timingSafeEqual`.
-  - `interface OtpProvider { readonly name: 'msg91' | 'dev'; codeFor(): string; send(e164: string, code: string): Promise<void>; }`
+  - `interface OtpProvider { readonly name: 'smtp' | 'msg91' | 'dev'; codeFor(): string; send(e164: string, code: string): Promise<void>; }`
+  - Decision 2026-11-04: `class SmtpOtpProvider implements OtpProvider` (name `'smtp'`, default) sends the code by email with `nodemailer` using the `SMTP_*` variables. It takes an injected transport in tests. The recipient address comes from the sign-in flow (see the decision note in Scope); `send` takes that address as its target in place of the E.164 number. The email transport is a free SMTP account, not a paid gateway.
   - `class Msg91OtpProvider implements OtpProvider` with `constructor(opts: { authKey: string; templateId: string; fetchImpl?: typeof fetch })`. `codeFor()` returns a random 6-digit string with leading zeros kept. `send()` POSTs JSON to `https://control.msg91.com/api/v5/otp` with header `authkey` and body `{ template_id, mobile: e164 without '+', otp }`. VERIFY AGAINST CURRENT DOCS BEFORE IMPLEMENTING (endpoint URL, `authkey` header name, and body field names). Throws on a non-2xx response.
   - `const DEV_OTP_CODE = '123456'`; `class DevFixedCodeProvider implements OtpProvider` with `codeFor() => DEV_OTP_CODE` and a no-op `send`.
-  - `selectOtpProvider(env: NodeJS.ProcessEnv): OtpProvider`. `OTP_PROVIDER=dev` throws if `NODE_ENV === 'production'`. `OTP_PROVIDER=msg91` requires `MSG91_AUTH_KEY` and `MSG91_TEMPLATE_ID`. Unset: `msg91` in production, `dev` otherwise. Any other value throws.
+  - `selectOtpProvider(env: NodeJS.ProcessEnv): OtpProvider`. `OTP_PROVIDER=dev` throws if `NODE_ENV === 'production'`. `OTP_PROVIDER=msg91` requires `MSG91_AUTH_KEY` and `MSG91_TEMPLATE_ID`. `OTP_PROVIDER=smtp` requires the `SMTP_*` variables (decision 2026-11-04). Unset: `smtp` in production and `dev` otherwise. The original "unset: `msg91` in production" default is superseded by decision 2026-11-04. Any other value throws.
   - `const OTP_TTL_SECONDS = 300`; `const OTP_MAX_ATTEMPTS = 5`.
   - `requestOtp(pool: pg.Pool, provider: OtpProvider, rawPhone: string): Promise<{ ok: true; e164: string } | { ok: false; reason: 'INVALID_PHONE' | 'RATE_LIMITED' }>`. `RATE_LIMITED` means the phone already has 3 challenges in the last hour.
   - `verifyOtp(pool: pg.Pool, rawPhone: string, code: string): Promise<{ ok: true; e164: string } | { ok: false; reason: 'INVALID_PHONE' | 'EXPIRED_OR_LOCKED' | 'WRONG_CODE' }>`
@@ -794,6 +803,8 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
   - `completeLogin(pool: pg.Pool, rawPhone: string, code: string): Promise<{ ok: true; token: string; maxAgeSeconds: number; userId: string; role: UserRole } | { ok: false; error: string }>`. Order: `verifyOtp`; on success `lookupUserByPhone`; if that returns `null`, call `createUserAfterOtp` in this same request. `verifyOtp` failures return before any user lookup or creation.
   - Server Actions `sendOtpAction(prev: LoginState, formData: FormData): Promise<LoginState>` and `verifyOtpAction(prev: LoginState, formData: FormData): Promise<LoginState>`. On success `verifyOtpAction` sets the cookie with `sessionCookieOptions` and calls `redirect('/')`.
 - Error copy: `INVALID_PHONE` shows "Enter a valid 10-digit Indian mobile number."; `WRONG_CODE` shows "That code is not right."; `EXPIRED_OR_LOCKED` shows "This code has expired or too many attempts were made. Request a new code."; `RATE_LIMITED` shows "Too many codes requested for this number. Try again in an hour."
+
+Decision 2026-11-04 (login flow): because the default code channel is email, the phone step also collects an email address (`email` added to `LoginState` and to the form; the code is sent to it). `sendOtpForPhone` and `sendOtpAction` take that address for delivery; the phone is still the identity. The exact pilot flow is an owner item (see the decision note in Scope). The `LoginState` type above is historical.
 
 The page is a Server Component. It shows a "Dev code: 123456" hint only when `selectOtpProvider(process.env).name === 'dev'`. `LoginForm.tsx` is a `'use client'` component using `useActionState`, with `inputMode="numeric"` and `autoComplete="one-time-code"` on the code field.
 
@@ -1522,7 +1533,8 @@ Co-Authored-By: Claude Haiku 5.5 <noreply@anthropic.com>"
 - Manual smoke test with `OTP_PROVIDER=dev` in `npm run dev`: `/auth/login` accepts `123456`, the response sets `fos_session` as HttpOnly and Secure, and `/profile/settings` lists saved VPAs.
 - Open items before pilot (tracked, not blocking this merge):
   1. Owner confirms the 2-second rating window. It is enforced in the database (migration `004`, Task 1) and in `submitVerifiedRating` (Task 9).
-  2. MSG91 endpoint, body fields, and template variables are confirmed against current MSG91 docs (VERIFY markers in Task 3).
+  2. MSG91 endpoint, body fields, and template variables are confirmed against current MSG91 docs (VERIFY markers in Task 3). MSG91 is optional since decision 2026-11-04; the SMTP path (free SMTP through `nodemailer`) is the default and needs its own check against the chosen SMTP account. Owner to confirm the pilot delivery flow for phone-only diners (decision note in Scope).
+  2a. Email challenge identifier column on `otp_challenges` (see decision note; planned in migration `011_totp_2fa`, not `004`). TOTP 2FA design is planned, not built.
   3. Cashfree timestamp unit (epoch milliseconds in this plan, code and Plan 06 after d411f82; production still NOT VERIFIED against a live webhook), signature header names, and the event id (this plan: signature header value; Plan 06: `data.payment.cf_payment_id`) are confirmed against current Cashfree docs and aligned with Plan 06 before Task 8 is implemented.
   4. Route path: this plan serves `/api/webhooks/razorpay` and `/api/webhooks/cashfree`; Plan 06 names `POST /api/payments/[provider]/webhook`. One path must be chosen and Plan 06 aligned.
   5. Producers of `order_refs` `completed` status and `settled_at` (Plan 03 writes them at session close, after migration `004`; Plan 06 settles them from the verified payment webhook) are not built yet, so the rating path has no live caller until then.
