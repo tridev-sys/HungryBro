@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { z } from 'zod';
 import { getPool } from '@/lib/db/client';
 import { asIntegration } from '@/lib/db/integration';
@@ -8,13 +10,16 @@ import { PosPayloadError } from '@/lib/pos/types';
 
 export const runtime = 'nodejs';
 
+// A signed event older than this is refused (replay window), when the provider gives its time.
+const POS_EVENT_MAX_AGE_MS = 5 * 60 * 1000;
+
 function json(status: number, body: unknown): Response {
   return Response.json(body, { status });
 }
 
 // Order of operations is fixed: resolve the restaurant, verify the signature, then parse,
 // then write. All of it runs in one transaction, so a failure rolls back.
-export async function POST(
+async function handlePost(
   req: Request,
   ctx: { params: Promise<{ provider: string; restaurantId: string }> },
 ): Promise<Response> {
@@ -47,6 +52,17 @@ export async function POST(
       const event = adapter.parseWebhook(rawBody, {
         expectedLocationId: typeof creds.location_id === 'string' ? creds.location_id : undefined,
       });
+      if (event.kind !== 'ignored') {
+        if (event.occurredAtMs !== undefined && Math.abs(Date.now() - event.occurredAtMs) > POS_EVENT_MAX_AGE_MS) {
+          return { status: 401, body: { error: 'stale' } };
+        }
+        // Replay guard: the same signed body is applied once for each restaurant.
+        const eventHash = createHash('sha256').update(rawBody).digest('hex');
+        const { rowCount } = await c.query(
+          'INSERT INTO pos_webhook_events (restaurant_id, event_hash) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+          [restaurantId, eventHash]);
+        if (rowCount === 0) return { status: 409, body: { error: 'replayed' } };
+      }
       if (event.kind === 'menu') await upsertMenu(c, restaurantId, event.items, { full: event.full });
       if (event.kind === 'stock') await setStock(c, restaurantId, event.pos_item_code, event.is_in_stock);
       return { status: 200, body: { ok: true, result: event.kind } };
@@ -57,3 +73,5 @@ export async function POST(
     throw e;
   }
 }
+
+export const POST = withApiGuards(handlePost, { sessionToken: publicSessionToken });

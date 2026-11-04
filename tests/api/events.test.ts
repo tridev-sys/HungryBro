@@ -42,3 +42,23 @@ test('stream opens with a snapshot and then forwards a bid published on the auct
   expect(next).toContain('"offeredPriceInr":710');
   ac.abort();
 });
+
+// Redis is unreachable: the events route must answer with the stable 503 quickly rather than
+// opening a stream that never delivers. Same bound as the intent route.
+test('with the mesh bus unavailable, the events route returns 503 MESH_BUS_UNAVAILABLE within 2 s', async () => {
+  const saved = process.env.REDIS_URL;
+  process.env.REDIS_URL = 'redis://127.0.0.1:1';
+  try {
+    const diner = await makeUser(admin, 'diner');
+    const auction = await makeAuction(admin, diner, { createdAgoSeconds: 1 });
+    const started = Date.now();
+    const res = await GET(new Request('http://localhost/x', { headers: { 'x-dev-diner': diner } }),
+      { params: Promise.resolve({ id: auction }) });
+    const elapsed = Date.now() - started;
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'mesh bus unavailable', code: 'MESH_BUS_UNAVAILABLE' });
+    expect(elapsed).toBeLessThan(2500);
+  } finally {
+    process.env.REDIS_URL = saved;
+  }
+}, 10_000);

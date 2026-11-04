@@ -110,7 +110,8 @@ export async function closeIfDue(
     if (!a.due) return { status: 'open', windowClosesAt };
 
     const intent = a.raw_intent_payload as DeliveryIntent;
-    const candidates = await matchKitchenNodes(deps.kitchens, intent);
+    // Same connection as the row lock: the search must not take a second pool connection.
+    const candidates = await matchKitchenNodes(deps.kitchens, intent, c);
     // Bids are read on the same connection, so the diner's own rows are visible.
     const bids = await readCounterBidsOn(c, auctionId);
     const [winner] = evaluateCounterBids(candidates, bids, a.budget);

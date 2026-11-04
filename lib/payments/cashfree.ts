@@ -89,7 +89,8 @@ export class CashfreeProvider implements PaymentProvider {
     // Timestamp window first, then the HMAC over timestamp + raw body.
     const ts = headers['x-webhook-timestamp'];
     if (!ts || !/^\d+$/.test(ts)) throw new WebhookSignatureError('cashfree webhook timestamp missing or malformed');
-    if (Math.abs(nowMs - Number(ts) * 1000) > WEBHOOK_WINDOW_MS) {
+    // x-webhook-timestamp is epoch milliseconds (13 digits in Cashfree's example), the same unit as nowMs.
+    if (Math.abs(nowMs - Number(ts)) > WEBHOOK_WINDOW_MS) {
       throw new WebhookSignatureError('cashfree webhook timestamp outside the allowed window');
     }
     const ok = verifyHmac({

@@ -1,7 +1,8 @@
+import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool } from '@/lib/db/client';
 import { verifyRazorpaySignature, recordWebhookEvent } from '@/lib/payments/webhooks';
 
-export async function POST(req: Request): Promise<Response> {
+async function handlePost(req: Request): Promise<Response> {
   // Read the raw text first; the signature is over these exact bytes. Parse JSON only after verification.
   const rawBody = await req.text();
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET ?? '';
@@ -16,3 +17,5 @@ export async function POST(req: Request): Promise<Response> {
   // Plan 06 attaches payment-state changes here, after the NEW branch.
   return Response.json({ ok: true }, { status: 200 });
 }
+
+export const POST = withApiGuards(handlePost, { sessionToken: publicSessionToken });
