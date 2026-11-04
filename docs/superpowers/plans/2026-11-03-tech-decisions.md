@@ -168,3 +168,9 @@ These decisions let the build continue while vendor answers and owner items are 
 - The 100 GB data disk is being detached and is not used. No file may depend on `/home/ubuntu/docker/data`. `PGDATA_DIR` is removed. `scripts/ec2-bootstrap.sh` no longer mounts a data disk. `scripts/verify-host.sh` checks the named volume and the root free space instead.
 - Backup scratch space is `backups-scratch/` in the repo on the root disk (git-ignored). `scripts/backup-pg.sh` checks free space before writing and refuses to run with less than 20 GiB free (`MIN_FREE_GIB`, default 20, the owner's rule).
 - Moving Postgres data to another disk later requires a verified backup first, then a restore check on the new location.
+
+**Amendment 2026-11-04 (owner decision, supersedes the Let's Encrypt wording in the shared reverse proxy bullet above)**
+- Domain `hungrybro.pacewisdom.in`, proxied by Cloudflare (orange cloud), SSL/TLS mode Full (strict).
+- Caddy terminates TLS with the Cloudflare Origin CA certificate: `tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem`, mounted read-only from the host folder `/etc/caddy/origin` (key mode 600). No ACME or Let's Encrypt for this site, because HTTP challenges fail behind the Cloudflare proxy. `ACME_EMAIL` is removed.
+- Host: Elastic IP in `ap-south-1`. The address lives only in GitHub variable `EC2_HOST` and the Cloudflare DNS record, never in the repo.
+- Client IP: Caddy sets `X-Real-IP` from `CF-Connecting-IP` (the one place the X-Real-IP contract changes).

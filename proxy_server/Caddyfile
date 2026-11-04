@@ -1,12 +1,13 @@
-{
-	email {$ACME_EMAIL}
-}
-
-# Food OS app. Routes the domain to the app container on the shared network.
-{$DOMAIN} {
+# Shared proxy. Domain hungrybro.pacewisdom.in is proxied by Cloudflare (orange cloud, SSL/TLS mode Full (strict)).
+# TLS uses the Cloudflare Origin CA certificate that the owner places on the host at /etc/caddy/origin
+# (mounted read-only into this container). No automatic certificates: Let's Encrypt HTTP challenges fail
+# behind the Cloudflare proxy.
+hungrybro.pacewisdom.in {
+	tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem
 	encode zstd gzip
+	# Cloudflare sets CF-Connecting-IP to the real client address. Caddy overwrites X-Real-IP with it.
 	reverse_proxy food-os-app:3000 {
-		header_up X-Real-IP {remote_host}
+		header_up X-Real-IP {header.CF-Connecting-IP}
 	}
 	header {
 		-Server
@@ -14,4 +15,9 @@
 	log {
 		output stdout
 	}
+}
+
+# Plain HTTP only redirects to HTTPS.
+http://hungrybro.pacewisdom.in {
+	redir https://hungrybro.pacewisdom.in{uri} permanent
 }
