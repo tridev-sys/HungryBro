@@ -3,6 +3,7 @@
 // Writes the fixture file the specs read (ids, table signature, session cookie values). Nothing
 // here is imported by the app.
 import { randomBytes, randomInt } from 'node:crypto';
+import { withClusterLock } from '../../../setup/cluster-lock';
 import { writeFileSync } from 'node:fs';
 import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { issueSession } from '@/lib/auth/session';
@@ -14,18 +15,21 @@ const fssai = () => String(randomInt(1e13, 1e14));
 
 async function ensureAppLogin(admin: ReturnType<typeof getAdminPool>, appUrl: string): Promise<void> {
   const password = decodeURIComponent(new URL(appUrl).password);
-  const c = await admin.connect();
-  try {
-    await c.query(`DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'food_app_login') THEN
-        CREATE ROLE food_app_login LOGIN;
-      END IF;
-    END $$`);
-    await c.query(`ALTER ROLE food_app_login WITH LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD ${c.escapeLiteral(password)}`);
-    await c.query('GRANT food_app TO food_app_login');
-  } finally {
-    c.release();
-  }
+  // Cluster-wide role DDL: runs under the same cluster lock as tests/helpers/db.ts.
+  await withClusterLock(async () => {
+    const c = await admin.connect();
+    try {
+      await c.query(`DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'food_app_login') THEN
+          CREATE ROLE food_app_login LOGIN;
+        END IF;
+      END $$`);
+      await c.query(`ALTER ROLE food_app_login WITH LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD ${c.escapeLiteral(password)}`);
+      await c.query('GRANT food_app TO food_app_login');
+    } finally {
+      c.release();
+    }
+  }, process.env.ADMIN_DATABASE_URL);
 }
 
 async function main(): Promise<void> {

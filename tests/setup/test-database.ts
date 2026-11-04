@@ -11,6 +11,7 @@ import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { runMigrations } from '../../lib/db/migrate';
 import { createDatabase, withDatabase } from './create-database';
+import { withClusterLock } from './cluster-lock';
 
 const PREFIX = 'food_os_test_';
 const NAME_RE = /^food_os_test_[a-z0-9]{6,40}$/;
@@ -23,13 +24,16 @@ function assertTestName(name: string): void {
 
 async function dropDatabase(adminRaw: string, name: string): Promise<void> {
   assertTestName(name);
-  const client = new pg.Client({ connectionString: withDatabase(adminRaw, 'postgres') });
-  await client.connect();
-  try {
-    await client.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
-  } finally {
-    await client.end();
-  }
+  // DROP DATABASE changes the shared pg_database catalog, so it runs under the cluster lock too.
+  await withClusterLock(async () => {
+    const client = new pg.Client({ connectionString: withDatabase(adminRaw, 'postgres') });
+    await client.connect();
+    try {
+      await client.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
+    } finally {
+      await client.end();
+    }
+  }, adminRaw);
 }
 
 export async function setup(): Promise<void> {

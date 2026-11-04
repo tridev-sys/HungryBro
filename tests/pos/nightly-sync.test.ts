@@ -4,16 +4,17 @@ import { getAdminPool, runMigrations } from '@/lib/db/client';
 import { runNightlyMenuSync, httpMenuFetcher } from '@/lib/pos/nightly-sync';
 import { getSyncPool, withSyncTx } from '@/lib/db/sync';
 import { createRestaurant } from '../helpers/db';
+import { setSyncLogin } from '../helpers/roles';
 
 const owner = getAdminPool();    // owner role for migrations, seed rows, and fixtures only
 const pool = getSyncPool(); // food_sync: the only pool the nightly sync uses
 beforeAll(async () => {
   await runMigrations(owner);
-  await owner.query(`ALTER ROLE food_sync LOGIN PASSWORD 'test-sync-only'`); // test database only
+  await setSyncLogin(owner, true); // test database only; cluster-wide DDL under the cluster lock
 });
 afterAll(async () => {
   await pool.end();
-  await owner.query(`ALTER ROLE food_sync NOLOGIN PASSWORD NULL`); // leave the shared test database as found
+  await setSyncLogin(owner, false); // leave the shared test database as found
   await owner.end();
 });
 
