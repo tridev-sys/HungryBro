@@ -26,15 +26,15 @@ Source for every row: owner, 2026-11-04. These are binding. Code and plans must 
 | Value | Owner setting | Code constant (file) |
 |---|---|---|
 | Platform take-rate (mesh fee) | Flat 3.5% infrastructure fee on GMV, `0.035` | `MESH_PROTOCOL_FEE_RATE` (`lib/pricing.ts`) |
-| Restaurant tabletop SaaS fee | 499 INR per month per physical outlet | Not in code |
+| Restaurant tabletop SaaS fee | 499 INR per month per physical outlet. DECIDED BY OWNER 2026-11-04 | `OUTLET_SAAS_FEE_INR`, `monthlySaasCharge` (`lib/finance/ledger.ts`); table `outlet_subscriptions` (migration 010) |
 | Statutory GST | 5% non-ITC GST, split 2.5% CGST and 2.5% SGST, `0.05` | `STATUTORY_GST_RATE` (`lib/pricing.ts`); split via `splitGst` (`lib/pricing.ts`) |
-| Delivery logistics | Direct pass-through at cost (about 50 INR baseline 3PL) | Not in code (sandbox dispatch has no price) |
+| Delivery logistics | Direct pass-through at cost (about 50 INR baseline 3PL). DECIDED BY OWNER 2026-11-04 | `DISPATCH_BASELINE_COST_INR` (config default only), `withPassThrough` (`lib/finance/ledger.ts`); table `delivery_pass_through_costs` (migration 010) |
 | Operational floor margin | 5% (`0.05`) minimum kitchen margin | `DEFAULT_FLOOR_MARGIN` (`lib/pricing.ts`); DB default `operational_floor_margin` (`db/migrations/001_init.sql`) |
-| Line backpressure threshold | Maximum 85% (`0.85`) active KDS load to participate in reverse auctions under 30 minutes | `AUCTION_MAX_LOAD` (`lib/auction/engine.ts`, SQL `active_kds_load < $4` in `lib/auction/kitchen-repository.ts`); `BACKPRESSURE_THRESHOLD` (`lib/kds/load.ts`) |
+| Line backpressure threshold | Maximum 85% (`0.85`) active KDS load to participate in reverse auctions under 30 minutes. INCLUSIVE: load exactly 0.85 is eligible, above 0.85 is not. DECIDED BY OWNER 2026-11-04 | `AUCTION_MAX_LOAD` (`lib/auction/engine.ts`, SQL `active_kds_load <= $4` in `lib/auction/kitchen-repository.ts`); KDS warning above 0.85 (`lib/kds/load.ts`) |
 | Reverse auction bid window | 18 seconds | `BID_WINDOW_MS` (`lib/auction/engine.ts`); SQL `INTERVAL '18 seconds'` (`lib/auction/auction-repository.ts`) |
 | Visual identity | Keep the current neutral design system for now | Tailwind neutral palette and `app/theme.css` tokens |
 
-Open point (owner decision): the owner wording "maximum 85%" can be read as inclusive (a kitchen at exactly 0.85 participates). The code and `CLAUDE.md` use strict `< 0.85`. Until the owner decides, the code stays strict.
+Decided (owner, 2026-11-04): the 85% load threshold is INCLUSIVE. A kitchen at exactly 0.85 is eligible; above 0.85 is not. The SaaS fee (499 INR per outlet per month) and the delivery pass-through at cost (about 50 INR baseline) are decided and built into the ledger (see the section 2026-11-04 business logic).
 
 ## Cross-plan rules (added in reconciliation)
 
@@ -181,3 +181,21 @@ These decisions let the build continue while vendor answers and owner items are 
 - **Migration 011_totp_2fa.sql.** Status: DECIDED. Creates `user_totp` and `totp_recovery_codes`, both RLS with FORCE and the self-manage policy (same shape as `user_vpas`). food_app gets SELECT, INSERT, UPDATE only. food_sync gets nothing. Migration 010 belongs to another agent and is not created here.
 - **Voice: Cartesia voices.** Status: DECIDED. Primary `7ea5e9c2-b719-4dc3-b870-5ba5f14d31d8` (env `CARTESIA_VOICE_ID`); fallback `f8f5f1b2-f02d-4d8e-a40d-fd850a487b3d` (env `CARTESIA_VOICE_ID_FALLBACK`). The fallback is used once on an HTTP 404 from the primary. Other errors are not retried.
 - **Cartesia model: sonic-3 kept.** Status: DECIDED. The Cartesia models page (checked 2026-11-04) names no cheaper or free model, so there is no silent switch.
+
+## Business logic decisions 2026-11-04 (owner decisions, engineering implementation)
+
+Binding for the business logic build (branch `feat/business-logic`, migration `010_business_ledger.sql`).
+
+- **Load threshold is inclusive.** Eligible when `active_kds_load <= 0.85`. Excluded above 0.85. Applied in `evaluateCounterBids`, `matchKitchenNodes`, and the SQL `active_kds_load <= $4`. The KDS warning stays "above 0.85" (`backpressureWarning`).
+- **Restaurant SaaS fee.** 499 INR per physical outlet per month. Table `outlet_subscriptions` (restaurant_id, outlet_label, monthly_fee_inr NUMERIC(10,2) default 499.00, status active/paused/cancelled, period_start, period_end). RLS: staff read their own restaurant only (`app_current_staff_restaurant_id()`, same pattern as 004 and 008). `food_app` has SELECT only. Writes are by `food_admin` (billing ops). `monthlySaasCharge(outlets)` is pure and rounds half-up with `round2`.
+- **Delivery logistics pass-through.** Table `delivery_pass_through_costs` (restaurant_id, delivery_id unique, provider shadowfax/rapido/dunzo, cost_inr NUMERIC(10,2) >= 0). No DB default cost: the cost is the dispatch adapter's value per order. `DISPATCH_BASELINE_COST_INR = 50` is a config constant only. `withPassThrough(orderTotal, dispatchCost)` adds the cost at cost (no markup), rounded half-up. `food_app` has SELECT only.
+- **30 minute SLA as an eligibility constraint.** A kitchen is eligible only when `prep + transit + buffer <= MAX_SLA_MINUTES`. `MAX_SLA_MINUTES = 30` (owner, "under 30 minutes", configurable). `SLA_BUFFER_MINUTES = 3` (engineering default). Boundary inclusive: 15 + 12 + 3 = 30 is eligible; 16 is not. Applied in the SQL (`restaurant_nodes.prep_time_minutes <= maxPrepMinutes`), in `matchKitchenNodes`, and to each counter bid's `estimatedPrepMinutes` in `evaluateCounterBids`.
+- **Prep time source.** Migration 010 adds `restaurant_nodes.prep_time_minutes INTEGER NOT NULL DEFAULT 12` (1 to 120). It is not granted to `food_app` (ops sets it as `food_admin`). 12 minutes is the existing estimate used by the sandbox kitchens (`lib/auction/sandbox-kitchens.ts`).
+- **Transit source.** No transit time is stored before dispatch. `TRANSIT_ESTIMATE_MINUTES = 12` reuses the existing estimate (the sandbox dispatch ETA in `lib/dispatch/sandbox.ts`). A distance-based transit model is a later change and needs a rule from the owner.
+- **Not wired yet.** The dispatch adapters do not return a cost, so no live code path writes `delivery_pass_through_costs` yet. This is a follow-up, not a gap in the calculation.
+
+**Amendment 2026-11-04 (owner decision, supersedes the Let's Encrypt wording in the shared reverse proxy bullet above)**
+- Domain `hungrybro.pacewisdom.in`, proxied by Cloudflare (orange cloud), SSL/TLS mode Full (strict).
+- Caddy terminates TLS with the Cloudflare Origin CA certificate: `tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem`, mounted read-only from the host folder `/etc/caddy/origin` (key mode 600). No ACME or Let's Encrypt for this site, because HTTP challenges fail behind the Cloudflare proxy. `ACME_EMAIL` is removed.
+- Host: Elastic IP in `ap-south-1`. The address lives only in GitHub variable `EC2_HOST` and the Cloudflare DNS record, never in the repo.
+- Client IP: Caddy sets `X-Real-IP` from `CF-Connecting-IP` (the one place the X-Real-IP contract changes).

@@ -10,7 +10,7 @@ const Q = { lat: 12.9716, lng: 77.6412 };
 // Unique item names per test so cross-test rows never match.
 const tag = () => `item${randomUUID().slice(0, 8)}`;
 const search = (items: string[], o: Partial<{ point: typeof Q }> = {}) => ({
-  point: o.point ?? Q, radiusM: 6000, maxLoad: 0.85,
+  point: o.point ?? Q, radiusM: 6000, maxLoad: 0.85, maxPrepMinutes: 15,
   items: items.map((q) => ({ query: q, servingTarget: 1 })), dietaryProfiles: [],
 });
 
@@ -31,14 +31,24 @@ test('includes a kitchen 5.5 km away and excludes one 6.8 km away (6 km radius)'
   expect(ids).not.toContain(far);
 });
 
-test('load 0.85 is excluded and 0.84 is included (Review Focus 2)', async () => {
+test('load 0.85 is included, 0.86 is excluded (inclusive threshold, owner 2026-11-04)', async () => {
   const t = tag();
   const at85 = await makeRestaurant(admin, { lat: Q.lat + 0.001, lng: Q.lng, load: 0.85 });
-  const at84 = await makeRestaurant(admin, { lat: Q.lat + 0.001, lng: Q.lng, load: 0.84 });
-  for (const r of [at85, at84]) await makeMenuItem(admin, r, t, 200);
+  const at86 = await makeRestaurant(admin, { lat: Q.lat + 0.001, lng: Q.lng, load: 0.86 });
+  for (const r of [at85, at86]) await makeMenuItem(admin, r, t, 200);
   const ids = (await repo.findCandidates(search([t]))).map((c) => c.restaurantId);
-  expect(ids).toContain(at84);
-  expect(ids).not.toContain(at85);
+  expect(ids).toContain(at85);
+  expect(ids).not.toContain(at86);
+});
+
+test('prep 15 min (15 + 12 + 3 = 30) is included and prep 16 min is excluded (30 minute SLA)', async () => {
+  const t = tag();
+  const edge = await makeRestaurant(admin, { lat: Q.lat + 0.001, lng: Q.lng, prep: 15 });
+  const late = await makeRestaurant(admin, { lat: Q.lat + 0.001, lng: Q.lng, prep: 16 });
+  for (const r of [edge, late]) await makeMenuItem(admin, r, t, 200);
+  const ids = (await repo.findCandidates(search([t]))).map((c) => c.restaurantId);
+  expect(ids).toContain(edge);
+  expect(ids).not.toContain(late);
 });
 
 test('distance reflects ST_MakePoint(lng, lat) order (Review Focus 3)', async () => {

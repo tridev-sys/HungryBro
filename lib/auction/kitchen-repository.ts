@@ -23,13 +23,15 @@ async function searchKitchens(c: pg.PoolClient, search: KitchenSearch): Promise<
     `SELECT r.id, r.name,
             ST_Distance(r.location, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography)::float8 AS distance_m,
             r.active_kds_load::float8 AS active_kds_load,
+            r.prep_time_minutes AS prep_minutes,
             r.rating_aggregate::float8 AS rating_aggregate,
             r.operational_floor_margin::float8 AS floor_margin
        FROM restaurant_nodes r
       WHERE ST_DWithin(r.location, ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, $3)
-        AND r.active_kds_load < $4
+        AND r.active_kds_load <= $4
+        AND r.prep_time_minutes <= $5
         AND r.is_accepting_delivery`,
-    [lng, lat, search.radiusM, search.maxLoad],
+    [lng, lat, search.radiusM, search.maxLoad, search.maxPrepMinutes],
   );
   if (restaurants.rows.length === 0) return [];
 
@@ -75,6 +77,7 @@ async function searchKitchens(c: pg.PoolClient, search: KitchenSearch): Promise<
       name: r.name,
       distanceM: r.distance_m,
       activeKdsLoad: r.active_kds_load,
+      prepMinutes: Number(r.prep_minutes),
       ratingAggregate: r.rating_aggregate,
       floorMargin: r.floor_margin,
       lines,

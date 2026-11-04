@@ -108,16 +108,21 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Write SSH key
+      - name: Write SSH key and pinned host key
+        env:
+          EC2_HOST_KEY: ${{ secrets.EC2_HOST_KEY }}
         run: |
           install -m 0600 /dev/null "$RUNNER_TEMP/deploy_key"
           printf '%s\n' "${{ secrets.EC2_SSH_KEY }}" > "$RUNNER_TEMP/deploy_key"
+          # Host public key captured once with ssh-keyscan and verified on the server (see deploy runbook).
+          printf '%s\n' "$EC2_HOST_KEY" > "$RUNNER_TEMP/known_hosts"
       - name: Deploy by SHA tag
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_HOST: ${{ vars.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
         run: |
-          ssh -i "$RUNNER_TEMP/deploy_key" -o StrictHostKeyChecking=yes "$EC2_USER@$EC2_HOST" \
+          ssh -i "$RUNNER_TEMP/deploy_key" -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/known_hosts" "$EC2_USER@$EC2_HOST" \
             "/home/ubuntu/docker/deploy.sh sha-$GITHUB_SHA"
       - name: Public health check
-        run: curl -fsS --retry 5 --retry-delay 5 "https://${{ secrets.DOMAIN }}/api/health" | grep -q '"ok":true'
+        run: curl -fsS --retry 5 --retry-delay 5 "https://${{ vars.DOMAIN }}/api/health" | grep -q '"ok":true'
