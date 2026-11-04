@@ -18,6 +18,13 @@ DB_NAME="food_os_test_${RUN_ID}"
 PG_IMAGE=postgis/postgis:16-3.4
 PG_HOST=127.0.0.1
 
+# The tracked-file IP guard runs `git ls-files` inside the container. node:22-alpine has no git, so a
+# local image adds it (built once, then cached). The repo's git dir is mounted read-only at its host
+# path because a worktree's .git file points at the main repo's git dir.
+NODE_IMAGE=food-os/node22-git:1
+GIT_COMMON="$(git -C "$WT" rev-parse --path-format=absolute --git-common-dir)"
+printf 'FROM node:22-alpine\nRUN apk add --no-cache git\n' | docker build -q --network host -t "$NODE_IMAGE" -f - "$(dirname "$0")" >/dev/null
+
 # Read-only or per-run-only psql through a throwaway container on the host network.
 psql_q() {
   docker run --rm --network host -e PGPASSWORD="$POSTGRES_PASSWORD" "$PG_IMAGE" \
@@ -45,7 +52,7 @@ mkdir -p "$LOG_DIR"
 # The full vitest output goes to test-results/ (git-ignored) inside the worktree. The console gets
 # only the summary and the first error block of each failed file (scripts/tests/vitest-summary.sh).
 set +e
-docker run --rm --network host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$WT":/app -w /app \
+docker run --rm --network host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$WT":/app -v "$GIT_COMMON:$GIT_COMMON:ro" -w /app \
   -e TEST_DB_RUN_ID="$RUN_ID" \
   -e VITEST_LOG="/app/test-results/isolated-$RUN_ID.log" \
   -e ADMIN_DATABASE_URL="postgres://food:${POSTGRES_PASSWORD}@127.0.0.1:5432/food_os" \
@@ -54,7 +61,7 @@ docker run --rm --network host --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$WT":
   -e DATABASE_URL="postgres://food_app_login:${APP_DB_PASSWORD}@127.0.0.1:5432/food_os" \
   -e REDIS_URL=redis://127.0.0.1:6379 \
   -e AUTH_JWT_SECRET=test-only-secret-not-for-production \
-  node:22-alpine sh -c 'npx vitest run "$@" > "$VITEST_LOG" 2>&1; exit $?' sh "$@"
+  "$NODE_IMAGE" sh -c 'npx vitest run "$@" > "$VITEST_LOG" 2>&1; exit $?' sh "$@"
 RC=$?
 set -e
 
