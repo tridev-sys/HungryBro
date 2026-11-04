@@ -4,10 +4,12 @@ export const DEV_OTP_CODE = '123456';
 export const OTP_TTL_SECONDS = 300;
 export const OTP_MAX_ATTEMPTS = 5;
 
+export type OtpSendResult = { ok: true } | { ok: false; code: 'OTP_SEND_FAILED' };
+
 export interface OtpProvider {
   readonly name: 'msg91' | 'dev';
   codeFor(): string;
-  send(e164: string, code: string): Promise<void>;
+  send(e164: string, code: string): Promise<OtpSendResult>;
 }
 
 export interface Msg91Options {
@@ -31,20 +33,37 @@ export class Msg91OtpProvider implements OtpProvider {
     return String(randomInt(0, 1_000_000)).padStart(6, '0');
   }
 
-  async send(e164: string, code: string): Promise<void> {
+  // MSG91 can answer HTTP 200 with a body of type "error", so the body is checked too.
+  // A failure never carries the phone number, the code, or any part of the response body.
+  async send(e164: string, code: string): Promise<OtpSendResult> {
     const doFetch = this.opts.fetchImpl ?? fetch;
-    const res = await doFetch(MSG91_URL, {
-      method: 'POST',
-      headers: { authkey: this.opts.authKey, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        template_id: this.opts.templateId,
-        mobile: e164.replace(/^\+/, ''),
-        otp: code,
-      }),
-    });
-    if (!res.ok) {
-      throw new Error(`MSG91 send failed with status ${res.status}`);
+    let res: Response;
+    try {
+      res = await doFetch(MSG91_URL, {
+        method: 'POST',
+        headers: { authkey: this.opts.authKey, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          template_id: this.opts.templateId,
+          mobile: e164.replace(/^\+/, ''),
+          otp: code,
+        }),
+      });
+    } catch {
+      return { ok: false, code: 'OTP_SEND_FAILED' };
     }
+    if (!res.ok) return { ok: false, code: 'OTP_SEND_FAILED' };
+
+    let body: unknown;
+    try {
+      body = JSON.parse(await res.text());
+    } catch {
+      return { ok: false, code: 'OTP_SEND_FAILED' };
+    }
+    const type = typeof body === 'object' && body !== null && 'type' in body ? (body as { type: unknown }).type : undefined;
+    if (typeof type === 'string' && type.toLowerCase() === 'error') {
+      return { ok: false, code: 'OTP_SEND_FAILED' };
+    }
+    return { ok: true };
   }
 }
 
@@ -55,8 +74,9 @@ export class DevFixedCodeProvider implements OtpProvider {
     return DEV_OTP_CODE;
   }
 
-  async send(): Promise<void> {
+  async send(): Promise<OtpSendResult> {
     // No SMS in development. The code is always DEV_OTP_CODE.
+    return { ok: true };
   }
 }
 

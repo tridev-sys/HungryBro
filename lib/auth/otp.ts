@@ -13,7 +13,7 @@ export function hashOtp(e164: string, code: string): string {
 
 export type RequestOtpResult =
   | { ok: true; e164: string }
-  | { ok: false; reason: 'INVALID_PHONE' | 'RATE_LIMITED' };
+  | { ok: false; reason: 'INVALID_PHONE' | 'RATE_LIMITED' | 'SEND_FAILED' };
 
 export type VerifyOtpResult =
   | { ok: true; e164: string }
@@ -32,7 +32,9 @@ export async function requestOtp(pool: pg.Pool, provider: OtpProvider, rawPhone:
   if (id === null) return { ok: false, reason: 'RATE_LIMITED' };
 
   // Send only after the challenge row has committed, using the same code that was hashed.
-  await provider.send(e164, code);
+  // The challenge row stays committed on a failed send, so the failed attempt still counts toward the hourly limit.
+  const sent = await provider.send(e164, code);
+  if (!sent.ok) return { ok: false, reason: 'SEND_FAILED' };
   return { ok: true, e164 };
 }
 

@@ -65,3 +65,26 @@ test('dev provider is refused in production (Review Focus 2)', () => {
   expect(() => selectOtpProvider({ OTP_PROVIDER: 'dev', NODE_ENV: 'production' })).toThrow(/not allowed in production/);
   expect(selectOtpProvider({ NODE_ENV: 'test' }).name).toBe('dev');
 });
+
+test('a failed provider send is reported as SEND_FAILED, not as sent', async () => {
+  const phone = randomPhone();
+  const failing = {
+    name: 'msg91' as const,
+    codeFor: () => '123456',
+    send: async () => ({ ok: false as const, code: 'OTP_SEND_FAILED' as const }),
+  };
+  expect(await requestOtp(pool, failing, phone)).toEqual({ ok: false, reason: 'SEND_FAILED' });
+});
+
+test('a failed send still counts toward the 3-per-hour limit (challenge row is committed before send)', async () => {
+  const phone = randomPhone();
+  const failing = {
+    name: 'msg91' as const,
+    codeFor: () => '123456',
+    send: async () => ({ ok: false as const, code: 'OTP_SEND_FAILED' as const }),
+  };
+  for (let i = 0; i < 3; i++) {
+    expect(await requestOtp(pool, failing, phone)).toEqual({ ok: false, reason: 'SEND_FAILED' });
+  }
+  expect(await requestOtp(pool, dev, phone)).toEqual({ ok: false, reason: 'RATE_LIMITED' });
+});
