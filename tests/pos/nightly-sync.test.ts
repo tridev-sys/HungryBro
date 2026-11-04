@@ -5,17 +5,25 @@ import { runNightlyMenuSync, httpMenuFetcher } from '@/lib/pos/nightly-sync';
 import { getSyncPool, withSyncTx } from '@/lib/db/sync';
 import { createRestaurant } from '../helpers/db';
 import { setSyncLogin } from '../helpers/roles';
+import { acquireFoodSyncLogin } from '../setup/cluster-lock';
 
 const owner = getAdminPool();    // owner role for migrations, seed rows, and fixtures only
 const pool = getSyncPool(); // food_sync: the only pool the nightly sync uses
+let releaseSyncLogin: (() => Promise<void>) | undefined;
 beforeAll(async () => {
+  // Holds the food_sync login window until afterAll, so no other run can turn the login off mid-file.
+  releaseSyncLogin = await acquireFoodSyncLogin();
   await runMigrations(owner);
   await setSyncLogin(owner, true); // test database only; cluster-wide DDL under the cluster lock
 });
 afterAll(async () => {
-  await pool.end();
-  await setSyncLogin(owner, false); // leave the shared test database as found
-  await owner.end();
+  try {
+    await pool.end();
+    await setSyncLogin(owner, false); // leave the shared test database as found
+    await owner.end();
+  } finally {
+    await releaseSyncLogin?.();
+  }
 });
 
 const menu = readFileSync(path.join(__dirname, '../fixtures/pos/petpooja-menu.json'), 'utf8');
