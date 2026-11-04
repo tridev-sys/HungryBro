@@ -16,6 +16,14 @@ describe('Dockerfile runner stage', () => {
     expect(runner).toMatch(/COPY --from=build \/app\/\.next\/static \.\/\.next\/static/);
   });
 
+  test('runs as a non-root user', () => {
+    const user = runner.match(/^USER\s+(\S+)\s*$/m)?.[1];
+    expect(user, 'runner stage must set a USER directive').toBeDefined();
+    const uid = user!.split(':')[0];
+    expect(uid).not.toBe('root');
+    expect(uid).not.toBe('0');
+  });
+
   test('starts the standalone server', () => {
     expect(runner).toMatch(/CMD \["node", "server\.js"\]/);
   });

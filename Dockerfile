@@ -27,6 +27,10 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/dist-scripts ./dist-scripts
 COPY --from=build /app/db/migrations ./db/migrations
 COPY --from=prod-deps /app/node_modules ./node_modules
+# Non-root runtime user fixed at uid/gid 10001. Only Next.js's on-disk cache needs write access.
+RUN addgroup -S -g 10001 app && adduser -S -u 10001 -G app app \
+ && mkdir -p /app/.next/cache && chown -R 10001:10001 /app/.next/cache
+USER 10001:10001
 EXPOSE 3000
 # Migrations run in the one-shot `migrate` service (docker-compose*.yml), never in this container.
 CMD ["node", "server.js"]

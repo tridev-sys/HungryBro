@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "./theme.css";
 
+/* Plan markdown under docs/ holds example class strings that are not real styles; keep it out of the scan. */
+@source not "../docs";
+
 body {
   background: var(--color-bg);
   color: var(--color-text);
