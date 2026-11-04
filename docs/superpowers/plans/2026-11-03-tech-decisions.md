@@ -19,6 +19,23 @@
 - Nothing project-related goes in `/opt`, `/mnt`, `/srv`, or other system folders.
 - **The host runs Docker only.** No Node.js, npm, or other language runtime is installed on the host, except the temporary Node exception recorded in CLAUDE.md (`/home/ubuntu/.local/node`, to be removed once tests run in containers). Every install, build, test, and run command executes inside a container, for example `docker run --rm -v /home/ubuntu/docker:/app -w /app node:22-alpine npm test`, or a compose service. Only Docker and OS packages are installed on the host.
 
+## Owner-set business values (2026-11-04)
+
+Source for every row: owner, 2026-11-04. These are binding. Code and plans must use these values exactly. "Code constant" is the name in the repo at d3bc907 (see the consistency check in the docs/owner-business-values branch report). "Not in code" means no constant exists yet.
+
+| Value | Owner setting | Code constant (file) |
+|---|---|---|
+| Platform take-rate (mesh fee) | Flat 3.5% infrastructure fee on GMV, `0.035` | `MESH_PROTOCOL_FEE_RATE` (`lib/pricing.ts`) |
+| Restaurant tabletop SaaS fee | 499 INR per month per physical outlet | Not in code |
+| Statutory GST | 5% non-ITC GST, split 2.5% CGST and 2.5% SGST, `0.05` | `STATUTORY_GST_RATE` (`lib/pricing.ts`); split via `splitGst` (`lib/pricing.ts`) |
+| Delivery logistics | Direct pass-through at cost (about 50 INR baseline 3PL) | Not in code (sandbox dispatch has no price) |
+| Operational floor margin | 5% (`0.05`) minimum kitchen margin | `DEFAULT_FLOOR_MARGIN` (`lib/pricing.ts`); DB default `operational_floor_margin` (`db/migrations/001_init.sql`) |
+| Line backpressure threshold | Maximum 85% (`0.85`) active KDS load to participate in reverse auctions under 30 minutes | `AUCTION_MAX_LOAD` (`lib/auction/engine.ts`, SQL `active_kds_load < $4` in `lib/auction/kitchen-repository.ts`); `BACKPRESSURE_THRESHOLD` (`lib/kds/load.ts`) |
+| Reverse auction bid window | 18 seconds | `BID_WINDOW_MS` (`lib/auction/engine.ts`); SQL `INTERVAL '18 seconds'` (`lib/auction/auction-repository.ts`) |
+| Visual identity | Keep the current neutral design system for now | Tailwind neutral palette and `app/theme.css` tokens |
+
+Open point (owner decision): the owner wording "maximum 85%" can be read as inclusive (a kitchen at exactly 0.85 participates). The code and `CLAUDE.md` use strict `< 0.85`. Until the owner decides, the code stays strict.
+
 ## Cross-plan rules (added in reconciliation)
 
 - **Migration order:** `001_init.sql` (Plan 01), `002_mesh_auction.sql` (Plan 02), `003_dine_in.sql` (Plan 03), `004_auth_ratings_compliance.sql` (Plan 05), `005_integrations.sql` (Plan 06). Plan 07 adds none.
