@@ -55,25 +55,14 @@ export async function verifyOtp(pool: pg.Pool, rawIdentifier: string, code: stri
   const id = normalizeIdentifier(rawIdentifier);
   if (!id) return { ok: false, reason: rawIdentifier.includes('@') ? 'INVALID_EMAIL' : 'INVALID_PHONE' };
 
-  // Count the attempt first, atomically. Commits even when the code turns out to be wrong.
-  const claimSql = id.kind === 'phone'
-    ? `UPDATE otp_challenges SET attempts = attempts + 1
-        WHERE id = (
-          SELECT id FROM otp_challenges
-          WHERE phone_e164 = $1 AND consumed_at IS NULL AND expires_at > NOW() AND attempts < $2
-          ORDER BY created_at DESC LIMIT 1
-        )
-        RETURNING id, code_hash`
-    : `UPDATE otp_challenges SET attempts = attempts + 1
-        WHERE id = (
-          SELECT id FROM otp_challenges
-          WHERE email = $1 AND consumed_at IS NULL AND expires_at > NOW() AND attempts < $2
-          ORDER BY created_at DESC LIMIT 1
-        )
-        RETURNING id, code_hash`;
+  // Count the attempt first, atomically, in app_claim_otp_challenge (migration 014). The attempt commits
+  // even when the code turns out to be wrong. The runtime role has no direct DML on otp_challenges.
   const claimed = await asRole(pool, null, async (c) => {
-    const { rows } = await c.query<{ id: string; code_hash: string }>(claimSql, [id.value, OTP_MAX_ATTEMPTS]);
-    return rows[0] ?? null;
+    const { rows } = await c.query<{ out_id: string; out_code_hash: string }>(
+      'SELECT out_id, out_code_hash FROM app_claim_otp_challenge($1, $2, $3)',
+      [id.kind, id.value, OTP_MAX_ATTEMPTS]);
+    const row = rows[0];
+    return row ? { id: row.out_id, code_hash: row.out_code_hash } : null;
   });
   if (!claimed) return { ok: false, reason: 'EXPIRED_OR_LOCKED' };
 
@@ -82,10 +71,8 @@ export async function verifyOtp(pool: pg.Pool, rawIdentifier: string, code: stri
   }
 
   const consumed = await asRole(pool, null, async (c) => {
-    const { rows } = await c.query(
-      'UPDATE otp_challenges SET consumed_at = NOW() WHERE id = $1 AND consumed_at IS NULL RETURNING id',
-      [claimed.id]);
-    return rows.length > 0;
+    const { rows } = await c.query<{ ok: boolean }>('SELECT app_consume_otp_challenge($1) AS ok', [claimed.id]);
+    return rows[0]?.ok === true;
   });
   if (!consumed) return { ok: false, reason: 'EXPIRED_OR_LOCKED' };
   return id.kind === 'phone' ? { ok: true, e164: id.value } : { ok: true, email: id.value };

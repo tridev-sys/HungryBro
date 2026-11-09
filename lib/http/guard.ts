@@ -68,11 +68,11 @@ export function withApiGuards<H extends (req: Request, ctx: never) => Promise<Re
     try {
       enforceDeclaredLength(req.headers);
       const limited = await guardRateLimit(req, opts.store ?? defaultStore(), opts.sessionToken?.(req) ?? null);
-      if (limited) return withSecurityHeaders(limited);
-      return withSecurityHeaders(await handler(req, ctx as never));
+      if (limited) return withSecurityHeaders(limited, req);
+      return withSecurityHeaders(await handler(req, ctx as never), req);
     } catch (err) {
       if (err instanceof PayloadTooLargeError) {
-        return withSecurityHeaders(Response.json({ error: 'payload_too_large' }, { status: 413 }));
+        return withSecurityHeaders(Response.json({ error: 'payload_too_large' }, { status: 413 }), req);
       }
       throw err;
     }
