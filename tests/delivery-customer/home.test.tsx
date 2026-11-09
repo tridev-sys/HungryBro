@@ -21,7 +21,7 @@ test('signed-in home: greeting, Order delivery, Dine in, My account, Sign out', 
   expect(within(nav).getByRole('link', { name: 'My account' })).toHaveAttribute('href', '/profile/settings');
   expect(within(nav).queryByRole('link', { name: 'Sign in' })).toBeNull();
   const form = screen.getByRole('button', { name: 'Sign out' }).closest('form')!;
-  expect(form).toHaveAttribute('action', '/api/auth/sign-out');
+  expect(form).toHaveAttribute('action', '/auth/logout');
   expect(form).toHaveAttribute('method', 'post');
 });
 

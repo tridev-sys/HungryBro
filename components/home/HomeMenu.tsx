@@ -17,7 +17,7 @@ export function HomeMenu({ signedIn, name }: { signedIn: boolean; name: string |
             <Link href="/profile/settings" className="flex min-h-11 items-center rounded-card bg-surface px-5 py-4 font-medium">
               My account
             </Link>
-            <form action="/api/auth/sign-out" method="post">
+            <form action="/auth/logout" method="post">
               <button type="submit" className="flex min-h-11 w-full items-center rounded-card bg-surface-2 px-5 py-4 font-medium">
                 Sign out
               </button>
