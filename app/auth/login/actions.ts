@@ -1,22 +1,25 @@
 'use server';
 
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getPool } from '@/lib/db/client';
 import { selectOtpProvider } from '@/lib/auth/otp-providers';
 import { sendOtpForIdentifier, otpStepFor, completeLogin, completeTotpLogin, type LoginState } from '@/lib/auth/login';
+import { allowSignInStep, SIGN_IN_LIMITED_MESSAGE } from '@/lib/auth/sign-in-limit';
 import {
   SESSION_COOKIE, sessionCookieOptions, TOTP_PENDING_COOKIE, TOTP_PENDING_SECONDS,
 } from '@/lib/auth/session';
 
 export async function sendOtpAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const identifier = String(formData.get('identifier') ?? '');
+  if (!(await allowSignInStep('sendCode', await headers()))) return { step: 'phone', error: SIGN_IN_LIMITED_MESSAGE };
   return sendOtpForIdentifier(await getPool(), selectOtpProvider(process.env), identifier);
 }
 
 export async function verifyOtpAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const identifier = String(formData.get('identifier') ?? '');
   const code = String(formData.get('code') ?? '');
+  if (!(await allowSignInStep('verifyCode', await headers()))) return otpStepFor(identifier, SIGN_IN_LIMITED_MESSAGE);
   const result = await completeLogin(await getPool(), identifier, code);
   if (!result.ok) return otpStepFor(identifier, result.error);
 
@@ -33,6 +36,7 @@ export async function verifyOtpAction(_prev: LoginState, formData: FormData): Pr
 
 export async function verifyTotpAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const code = String(formData.get('code') ?? '');
+  if (!(await allowSignInStep('verifyCode', await headers()))) return { step: 'totp', error: SIGN_IN_LIMITED_MESSAGE };
   const jar = await cookies();
   const pending = jar.get(TOTP_PENDING_COOKIE)?.value ?? '';
   const result = await completeTotpLogin(await getPool(), pending, code);
