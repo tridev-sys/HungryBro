@@ -26,5 +26,19 @@ export default defineConfig({
         reuseExistingServer: true,
         timeout: 120_000,
       },
-  projects: [{ name: 'chromium', use: { ...devices['Pixel 7'] } }],
+  // Same browser setup as tests/e2e/journeys/playwright.config.ts. The app sets Secure cookies
+  // (fos_session, fos_table_session), and the test network is plain HTTP. Only the full Chromium
+  // build honours --unsafely-treat-insecure-origin-as-secure; the headless shell drops those cookies.
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Pixel 7'],
+        channel: 'chromium',
+        launchOptions: {
+          args: [`--unsafely-treat-insecure-origin-as-secure=${new URL(baseURL).origin}`],
+        },
+      },
+    },
+  ],
 });

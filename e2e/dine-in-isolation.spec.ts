@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { FIXTURE_RESTAURANTS, FIXTURE_ITEMS } from '@/lib/seed/fixtures';
 import { getAdminPool } from '@/lib/db/client';
 import { tableSignatures } from '@/lib/seed/run';
@@ -7,6 +7,12 @@ const r = FIXTURE_RESTAURANTS[0];
 let sigs: Record<string, string> = {};
 test.beforeAll(async () => { sigs = await tableSignatures(getAdminPool(), r.id); });
 test.afterAll(async () => { await getAdminPool().end(); });
+
+// Current UI: the menu list (aria-label "Menu") has an "Add <item name>" button per dish, and each
+// kitchen ticket renders as an <article> headed "Ticket #NN" with its item lines.
+const addItem = (page: Page, name: string) =>
+  page.getByRole('list', { name: 'Menu' }).getByRole('button', { name: `Add ${name}`, exact: true });
+const kdsTickets = (page: Page) => page.getByRole('article').filter({ has: page.getByRole('heading', { name: /^Ticket #/ }) });
 
 test('two tables ordering at the same moment do not see each other tickets', async ({ browser }) => {
   test.setTimeout(60_000);
@@ -20,15 +26,15 @@ test('two tables ordering at the same moment do not see each other tickets', asy
       b.goto(`/dine/${r.id}/${r.tables[1]}?sig=${sigs[r.tables[1]]}`),
     ]);
     await Promise.all([
-      a.getByTestId(`add-item-${FIXTURE_ITEMS.paneerTikka.code}`).click(),
-      b.getByTestId(`add-item-${FIXTURE_ITEMS.freshLimeSoda.code}`).click(),
+      addItem(a, FIXTURE_ITEMS.paneerTikka.name).click(),
+      addItem(b, FIXTURE_ITEMS.freshLimeSoda.name).click(),
     ]);
-    await expect(a.getByTestId('kds-ticket')).toHaveCount(1);
-    await expect(a.getByTestId('kds-ticket')).toContainText(FIXTURE_ITEMS.paneerTikka.name);
-    await expect(b.getByTestId('kds-ticket')).toHaveCount(1);
-    await expect(b.getByTestId('kds-ticket')).toContainText(FIXTURE_ITEMS.freshLimeSoda.name);
-    await expect(a.getByTestId('kds-ticket').filter({ hasText: FIXTURE_ITEMS.freshLimeSoda.name })).toHaveCount(0);
-    await expect(b.getByTestId('kds-ticket').filter({ hasText: FIXTURE_ITEMS.paneerTikka.name })).toHaveCount(0);
+    await expect(kdsTickets(a)).toHaveCount(1);
+    await expect(kdsTickets(a)).toContainText(FIXTURE_ITEMS.paneerTikka.name);
+    await expect(kdsTickets(b)).toHaveCount(1);
+    await expect(kdsTickets(b)).toContainText(FIXTURE_ITEMS.freshLimeSoda.name);
+    await expect(kdsTickets(a).filter({ hasText: FIXTURE_ITEMS.freshLimeSoda.name })).toHaveCount(0);
+    await expect(kdsTickets(b).filter({ hasText: FIXTURE_ITEMS.paneerTikka.name })).toHaveCount(0);
   } finally {
     await ctxA.close();
     await ctxB.close();

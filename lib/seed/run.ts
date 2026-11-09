@@ -5,6 +5,11 @@ import { CATEGORIES, FIXTURE_ITEMS, FIXTURE_RESTAURANTS, fixedUuid } from './fix
 export interface SeedOptions {
   nodeEnv?: string;
   allowProd?: boolean;
+  /**
+   * Test-only (opt-in, off by default): one restaurant_staff user per fixture restaurant, so sandbox
+   * kitchens can bid in the delivery auction. scripts/seed.ts never sets this.
+   */
+  staffUsers?: boolean;
 }
 
 export interface SeedResult {
@@ -60,6 +65,16 @@ export async function runSeed(pool: pg.Pool, opts: SeedOptions = {}): Promise<Se
           [r.id, stationToCategory.get(item.station) ?? null, item.code, item.name, item.basePrice, item.dietary],
         );
         result.menuItems++;
+      }
+
+      if (opts.staffUsers === true) {
+        // Deterministic phone per fixture restaurant, outside the random range the journey seed uses.
+        await client.query(
+          `INSERT INTO users (phone_number, full_name, role, restaurant_id)
+           VALUES ($1, $2, 'restaurant_staff', $3)
+           ON CONFLICT (phone_number) DO UPDATE SET role = EXCLUDED.role, restaurant_id = EXCLUDED.restaurant_id`,
+          [`+919${String(n).padStart(9, '0')}`, `${r.name} staff`, r.id],
+        );
       }
 
       for (const number of r.tables) {

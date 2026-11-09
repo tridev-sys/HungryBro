@@ -1,11 +1,24 @@
 import { test, expect } from '@playwright/test';
+import pg from 'pg';
 import { FIXTURE_RESTAURANTS, DROP } from '@/lib/seed/fixtures';
+import { runSeed } from '@/lib/seed/run';
 import { fixture, signIn } from '../tests/e2e/journeys/support/fixtures';
 
 // Delivery requests need a signed-in diner (POST /api/delivery/intent returns 401 without one).
 // The diner session comes from the journey fixture file, the same way the journey specs get theirs.
 const seededIds = new Set(FIXTURE_RESTAURANTS.map((r) => r.id));
 const seededNames = new Set(FIXTURE_RESTAURANTS.map((r) => r.name));
+
+// Sandbox kitchens bid only for restaurants that have a staff user. The base seed creates none, so
+// add one per fixture restaurant through the seed (opt-in flag; scripts/seed.ts never sets it).
+let seedPool: pg.Pool | undefined;
+test.beforeAll(async () => {
+  seedPool = new pg.Pool({ connectionString: process.env.ADMIN_DATABASE_URL });
+  await runSeed(seedPool, { staffUsers: true });
+});
+test.afterAll(async () => {
+  await seedPool?.end();
+});
 
 test('one voice query returns ranked bundles from several seeded kitchens', async ({ page, context }) => {
   test.setTimeout(90_000);

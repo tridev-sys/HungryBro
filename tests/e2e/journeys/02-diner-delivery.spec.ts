@@ -6,8 +6,13 @@ test.describe('Journey 2: delivery order', () => {
   test('metadata card, ranked counter-bids, and the 3PL panel', async ({ page, context }) => {
     // Delivery needs a signed-in diner (POST /api/delivery/intent returns 401 without one).
     await signIn(context, fixture.diner.sessionToken);
+    // The console uses the diner's live browser position when it has one (no ?lat&lng any more).
+    // Grant geolocation and fix it at the Indiranagar centroid, so the metadata card shows that point.
+    await context.grantPermissions(['geolocation'], { origin: new URL(process.env.BASE_URL ?? '').origin });
+    await context.setGeolocation({ latitude: 12.9719, longitude: 77.6408 });
     await page.goto('/delivery');
     await expect(page.getByRole('heading', { level: 1, name: 'Order delivery' })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: 'Using your current location.' })).toBeVisible();
 
     // The request is typed here, since the mic is a placeholder until Plan 04.
     const request = 'Dinner for 3: Biryani & Kebab strictly under ₹800, delivered in 30 mins to Indiranagar';
