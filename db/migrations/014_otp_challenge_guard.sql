@@ -8,7 +8,8 @@
 -- - food_app and food_sync lose every table privilege on otp_challenges.
 -- - The issue functions (004, 012) insert the row, so they become SECURITY DEFINER with a fixed
 --   search_path. Their bodies are unchanged.
--- - app_claim_otp_challenge counts an attempt atomically and returns the candidate challenge.
+-- - app_claim_otp_challenge counts an attempt atomically. The cap is re-checked on the locked row in the
+--   outer WHERE, so concurrent guesses cannot push attempts past the cap.
 -- - app_consume_otp_challenge marks a challenge consumed, once.
 -- Both claim and consume run as food_admin. food_app gets EXECUTE only.
 
@@ -60,8 +61,8 @@ BEGIN
        WHERE c.id = (
          SELECT s.id FROM otp_challenges s
           WHERE s.phone_e164 = p_value AND s.consumed_at IS NULL AND s.expires_at > NOW()
-            AND s.attempts < p_max_attempts
           ORDER BY s.created_at DESC LIMIT 1)
+         AND c.consumed_at IS NULL AND c.expires_at > NOW() AND c.attempts < p_max_attempts
        RETURNING c.id, c.code_hash;
   ELSIF p_kind = 'email' THEN
     RETURN QUERY
@@ -69,8 +70,8 @@ BEGIN
        WHERE c.id = (
          SELECT s.id FROM otp_challenges s
           WHERE s.email = p_value AND s.consumed_at IS NULL AND s.expires_at > NOW()
-            AND s.attempts < p_max_attempts
           ORDER BY s.created_at DESC LIMIT 1)
+         AND c.consumed_at IS NULL AND c.expires_at > NOW() AND c.attempts < p_max_attempts
        RETURNING c.id, c.code_hash;
   ELSE
     RAISE EXCEPTION 'INVALID_IDENTIFIER_KIND' USING ERRCODE = '22023';
