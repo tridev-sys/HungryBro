@@ -63,7 +63,8 @@ test('invalid phone never creates a challenge (Review Focus 1)', async () => {
 
 test('dev provider is refused in production (Review Focus 2)', () => {
   expect(() => selectOtpProvider({ OTP_PROVIDER: 'dev', NODE_ENV: 'production' })).toThrow(/not allowed in production/);
-  expect(selectOtpProvider({ NODE_ENV: 'test' }).name).toBe('dev');
+  expect(selectOtpProvider({ NODE_ENV: 'test', OTP_PROVIDER: 'dev' }).name).toBe('dev');
+  expect(() => selectOtpProvider({ NODE_ENV: 'test' })).toThrow(/No OTP provider/);
 });
 
 test('a failed provider send is reported as SEND_FAILED, not as sent', async () => {

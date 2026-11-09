@@ -9,10 +9,16 @@ const SMTP = {
 };
 const MSG91 = { MSG91_AUTH_KEY: 'msg91-key', MSG91_TEMPLATE_ID: 'tpl-1' };
 
-test('development and test default to the fixed dev code, even with SMTP configured', () => {
-  expect(selectOtpProvider({ NODE_ENV: 'development' }).name).toBe('dev');
-  expect(selectOtpProvider({ NODE_ENV: 'test' }).name).toBe('dev');
-  expect(selectOtpProvider({ NODE_ENV: 'test', ...SMTP }).name).toBe('dev');
+// The fixed dev code is chosen only when OTP_PROVIDER=dev is set. NODE_ENV alone never selects it.
+test('development and test do not select the fixed dev code without OTP_PROVIDER=dev', () => {
+  expect(() => selectOtpProvider({ NODE_ENV: 'development' })).toThrow(/No OTP provider/);
+  expect(() => selectOtpProvider({ NODE_ENV: 'test' })).toThrow(/No OTP provider/);
+  expect(selectOtpProvider({ NODE_ENV: 'test', ...SMTP }).name).toBe('email');
+});
+
+test('OTP_PROVIDER=dev selects the dev provider outside production', () => {
+  expect(selectOtpProvider({ NODE_ENV: 'development', OTP_PROVIDER: 'dev' }).name).toBe('dev');
+  expect(selectOtpProvider({ NODE_ENV: 'test', OTP_PROVIDER: 'dev', ...SMTP }).name).toBe('dev');
 });
 
 test('production with SMTP configured and no OTP_PROVIDER selects email', () => {

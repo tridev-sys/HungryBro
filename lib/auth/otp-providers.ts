@@ -177,7 +177,7 @@ function msg91ProviderFrom(env: NodeJS.ProcessEnv): Msg91OtpProvider {
 }
 
 /**
- * Chooses the OTP provider from OTP_PROVIDER (email | msg91 | dev).
+ * Chooses the OTP provider from OTP_PROVIDER (email | msg91 | dev). Unset: email when SMTP_HOST is set, else refused.
  * Unset: dev in development and test; email in production when SMTP_HOST is set; otherwise an error.
  * MSG91 is never chosen unless OTP_PROVIDER=msg91 is set. The dev provider is refused in production.
  */
@@ -193,7 +193,7 @@ export function selectOtpProvider(env: NodeJS.ProcessEnv): OtpProvider {
   if (mode === 'msg91') return msg91ProviderFrom(env);
   if (mode) throw new Error(`Unknown OTP_PROVIDER: ${mode}`);
 
-  if (!production) return new DevFixedCodeProvider();
+  // The dev provider (fixed code) is never implied by NODE_ENV. It needs OTP_PROVIDER=dev, handled above.
   if (env.SMTP_HOST) return emailProviderFrom(env);
   throw new Error('No OTP provider configured: set SMTP_HOST and SMTP_FROM, or OTP_PROVIDER');
 }
