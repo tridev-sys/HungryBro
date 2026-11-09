@@ -155,6 +155,10 @@ const AUDITED_CONTROLS: Record<string, number> = {
   'components/dine/DynamicUpiQrModal.tsx': 1,
   'components/dine/MenuList.tsx': 1,
   'components/kds/StationTicketCard.tsx': 2,
+  // Added with the delivery customer flow (feat/delivery-customer-flow): one stepper button per row.
+  'components/order/CartView.tsx': 1,
+  'components/order/CheckoutView.tsx': 1,
+  'components/order/MenuList.tsx': 2,
   'components/ratings/RatingModal.tsx': 5,
   'components/ui/ActionBar.tsx': 2,
   'components/ui/AppShell.tsx': 2,

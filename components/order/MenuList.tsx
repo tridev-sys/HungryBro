@@ -75,7 +75,7 @@ function MenuRow({
           aria-label={`Remove ${item.name}`}
           disabled={quantity === 0}
           onClick={onRemove}
-          className="h-10 w-10 rounded-pill bg-surface-2 disabled:opacity-40"
+          className="h-11 w-11 rounded-pill bg-surface-2 disabled:opacity-40"
         >
           −
         </button>
@@ -85,7 +85,7 @@ function MenuRow({
           aria-label={`Add ${item.name}`}
           disabled={quantity >= MAX_LINE_QUANTITY}
           onClick={onAdd}
-          className="h-10 w-10 rounded-pill bg-accent text-accent-ink disabled:opacity-40"
+          className="h-11 w-11 rounded-pill bg-accent text-accent-ink disabled:opacity-40"
         >
           +
         </button>

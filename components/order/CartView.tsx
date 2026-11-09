@@ -46,7 +46,7 @@ export function CartView() {
                 type="button"
                 aria-label={`Remove one ${line.name}`}
                 onClick={() => removeLine(line.menuItemId)}
-                className="h-10 w-10 rounded-pill bg-surface-2"
+                className="h-11 w-11 rounded-pill bg-surface-2"
               >
                 −
               </button>
