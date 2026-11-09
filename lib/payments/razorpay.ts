@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { verifyHmac } from '../webhooks/hmac';
 import { buildUpiIntentUrl } from './upi';
 import {
+  isDefiniteRefusal,
   PaymentCreateError,
   WebhookPayloadError,
   WebhookSignatureError,
@@ -53,10 +54,10 @@ export class RazorpayProvider implements PaymentProvider {
       body: JSON.stringify({ amount: Math.round(req.amountInr * 100), currency: 'INR', receipt: req.orderRef }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) throw new PaymentCreateError(`razorpay order create failed with status ${res.status}`);
+    if (!res.ok) throw new PaymentCreateError(`razorpay order create failed with status ${res.status}`, isDefiniteRefusal(res.status));
     const json = (await res.json()) as { id?: unknown };
     if (typeof json.id !== 'string' || json.id.length === 0) {
-      throw new PaymentCreateError('razorpay response has no order id');
+      throw new PaymentCreateError('razorpay response has no order id', false);
     }
     return {
       provider: 'razorpay',

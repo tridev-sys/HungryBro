@@ -3,6 +3,7 @@ import { round2 } from '../pricing';
 import { verifyHmac } from '../webhooks/hmac';
 import { buildUpiIntentUrl } from './upi';
 import {
+  isDefiniteRefusal,
   PaymentCreateError,
   WebhookPayloadError,
   WebhookSignatureError,
@@ -62,10 +63,10 @@ export class CashfreeProvider implements PaymentProvider {
       }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) throw new PaymentCreateError(`cashfree order create failed with status ${res.status}`);
+    if (!res.ok) throw new PaymentCreateError(`cashfree order create failed with status ${res.status}`, isDefiniteRefusal(res.status));
     const json = (await res.json()) as { order_id?: unknown };
     if (typeof json.order_id !== 'string' || json.order_id.length === 0) {
-      throw new PaymentCreateError('cashfree response has no order id');
+      throw new PaymentCreateError('cashfree response has no order id', false);
     }
     return {
       provider: 'cashfree',
@@ -117,9 +118,14 @@ export class CashfreeProvider implements PaymentProvider {
     const data = parsed.data.data;
     if (eventType !== 'ignored' && !data) throw new WebhookPayloadError('cashfree payment event has no data');
 
+    // The event key is the payment id plus the event type, read from the verified body. The signature
+    // header and the timestamp change on every retry, so they are not part of the key.
+    const providerEventId = data
+      ? `${String(data.payment.cf_payment_id)}:${parsed.data.type}`
+      : `${parsed.data.type}:${ts}`;
     return {
       provider: 'cashfree',
-      providerEventId: data ? String(data.payment.cf_payment_id) : '',
+      providerEventId,
       eventType,
       providerOrderId: data?.order.order_id ?? '',
       amountInr: data ? data.order.order_amount : 0,

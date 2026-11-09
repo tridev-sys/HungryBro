@@ -57,7 +57,7 @@ test('cashfree verifies a fresh signed webhook over timestamp plus body (epoch m
   const ts = String(Date.now());
   const sig = createHmac('sha256', 'cfwh').update(ts + raw).digest('base64');
   const ev = new CashfreeProvider(cfCfg).verifyWebhook(raw, { 'x-webhook-signature': sig, 'x-webhook-timestamp': ts });
-  expect(ev).toMatchObject({ provider: 'cashfree', providerEventId: '555001', eventType: 'payment.captured', providerOrderId: 'ord-1', amountInr: 698 });
+  expect(ev).toMatchObject({ provider: 'cashfree', providerEventId: '555001:PAYMENT_SUCCESS_WEBHOOK', eventType: 'payment.captured', providerOrderId: 'ord-1', amountInr: 698 });
 });
 
 test('cashfree rejects a validly signed webhook older than the 5 minute window (milliseconds)', () => {

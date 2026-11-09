@@ -1,21 +1,10 @@
 import { withApiGuards, publicSessionToken } from '@/lib/http/guard';
 import { getPool } from '@/lib/db/client';
-import { verifyRazorpaySignature, recordWebhookEvent } from '@/lib/payments/webhooks';
+import { handleProviderWebhook } from '@/lib/payments/webhook-handler';
 
+// Every payment webhook goes through handleProviderWebhook: verify first, then one database call.
 async function handlePost(req: Request): Promise<Response> {
-  // Read the raw text first; the signature is over these exact bytes. Parse JSON only after verification.
-  const rawBody = await req.text();
-  const secret = process.env.RAZORPAY_WEBHOOK_SECRET ?? '';
-  if (!verifyRazorpaySignature(rawBody, req.headers.get('x-razorpay-signature'), secret)) {
-    return Response.json({ error: 'INVALID_SIGNATURE' }, { status: 401 });
-  }
-  const eventId = req.headers.get('x-razorpay-event-id');
-  if (!eventId) return Response.json({ error: 'MISSING_EVENT_ID' }, { status: 400 });
-
-  const recorded = await recordWebhookEvent(await getPool(), 'razorpay', eventId);
-  if (recorded === 'DUPLICATE') return Response.json({ error: 'DUPLICATE_EVENT' }, { status: 409 });
-  // Plan 06 attaches payment-state changes here, after the NEW branch.
-  return Response.json({ ok: true }, { status: 200 });
+  return handleProviderWebhook(req, 'razorpay', await getPool());
 }
 
 export const POST = withApiGuards(handlePost, { sessionToken: publicSessionToken });

@@ -22,7 +22,7 @@ function unavailable(name: PaymentProviderName): PaymentProvider {
   return {
     name,
     async createUpiIntent() {
-      throw new PaymentCreateError(`${name} is not configured`);
+      throw new PaymentCreateError(`${name} is not configured`, true);
     },
     verifyWebhook() {
       throw new PaymentCreateError(`${name} is not configured`);

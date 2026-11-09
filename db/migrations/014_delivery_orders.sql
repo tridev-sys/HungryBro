@@ -117,10 +117,10 @@ GRANT SELECT, INSERT ON delivery_orders, delivery_order_lines TO food_app;
 -- ===== Payment capture (webhook path) =====
 -- Called only after the route verified the HMAC signature. One transaction: the event is recorded
 -- once (webhook_events primary key), and only a new capture of the exact stored total marks the
--- order paid and moves it to the kitchen. Returns DUPLICATE, IGNORED, UNKNOWN_ORDER, NOOP,
+-- order paid and moves it to the kitchen. The amount is integer paise. Returns DUPLICATE, IGNORED, UNKNOWN_ORDER, NOOP,
 -- AMOUNT_MISMATCH, or PAID.
 CREATE OR REPLACE FUNCTION app_apply_payment_event(p_provider TEXT, p_event_id TEXT, p_event_type TEXT,
-                                                   p_provider_order_id TEXT, p_amount NUMERIC)
+                                                   p_provider_order_id TEXT, p_amount_paise BIGINT)
 RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_order delivery_orders%ROWTYPE;
@@ -134,7 +134,8 @@ BEGIN
    FOR UPDATE;
   IF NOT FOUND THEN RETURN 'UNKNOWN_ORDER'; END IF;
   IF v_order.status <> 'pending_payment' THEN RETURN 'NOOP'; END IF;
-  IF p_amount IS DISTINCT FROM v_order.total THEN RETURN 'AMOUNT_MISMATCH'; END IF;
+  -- Compare in paise: the stored NUMERIC(10,2) total times 100 against the provider's integer amount.
+  IF p_amount_paise IS DISTINCT FROM (ROUND(v_order.total * 100))::BIGINT THEN RETURN 'AMOUNT_MISMATCH'; END IF;
 
   UPDATE delivery_orders SET status = 'in_kitchen', paid_at = NOW() WHERE id = v_order.id;
   RETURN 'PAID';
@@ -173,9 +174,9 @@ BEGIN
   RETURN v_ref;
 END $$;
 
-REVOKE ALL ON FUNCTION app_apply_payment_event(TEXT, TEXT, TEXT, TEXT, NUMERIC) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_apply_payment_event(TEXT, TEXT, TEXT, TEXT, BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_mark_delivery_delivered(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_check_delivery_totals() FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_price_delivery_line() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app_apply_payment_event(TEXT, TEXT, TEXT, TEXT, NUMERIC) TO food_app;
+GRANT EXECUTE ON FUNCTION app_apply_payment_event(TEXT, TEXT, TEXT, TEXT, BIGINT) TO food_app;
 GRANT EXECUTE ON FUNCTION app_mark_delivery_delivered(UUID) TO food_app;

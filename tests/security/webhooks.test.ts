@@ -32,7 +32,9 @@ const eventCount = async (provider: string, eventId?: string): Promise<number> =
   return rows[0].n;
 };
 
-const rzpBody = (id: string) => JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { id: `pay_${id}`, amount: 1000 } } } });
+// Bodies updated (owner review item 6): both routes verify through the provider adapter, which needs the
+// provider's real event shape (order id and amount). A valid event for an unknown order is recorded and answered 200.
+const rzpBody = (id: string) => JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { id: `pay_${id}`, order_id: `order_${id}`, amount: 1000 } } } });
 const rzpSig = (body: string, secret = RZP_SECRET) => createHmac('sha256', secret).update(body).digest('hex');
 const rzpReq = (body: string, headers: Record<string, string>) =>
   new Request('http://localhost:3000/api/webhooks/razorpay', { method: 'POST', headers, body });
@@ -93,10 +95,10 @@ describe('Razorpay webhook', () => {
     try {
       const id = `evt-nosecret-${Date.now()}`;
       const body = rzpBody(id);
-      // The route has no response to return when unconfigured: verifyRazorpaySignature throws
-      // 'webhook secret is not configured' before any comparison, so the request rejects.
-      await expect(razorpayPOST(rzpReq(body, { 'x-razorpay-signature': rzpSig(body, ''), 'x-razorpay-event-id': id })))
-        .rejects.toThrow('webhook secret is not configured');
+      // Updated (owner review item 6): the shared handler answers 503 WEBHOOK_NOT_CONFIGURED before any
+      // verification or state change, instead of throwing.
+      const res = await razorpayPOST(rzpReq(body, { 'x-razorpay-signature': rzpSig(body, ''), 'x-razorpay-event-id': id }));
+      expect(res.status).toBe(503);
       expect(await eventCount('razorpay', id)).toBe(0);
     } finally {
       process.env.RAZORPAY_WEBHOOK_SECRET = saved;
@@ -105,7 +107,7 @@ describe('Razorpay webhook', () => {
 });
 
 describe('Cashfree webhook', () => {
-  const cfBody = (id: string) => JSON.stringify({ type: 'PAYMENT_SUCCESS_WEBHOOK', data: { payment: { cf_payment_id: id } } });
+  const cfBody = (id: string) => JSON.stringify({ type: 'PAYMENT_SUCCESS_WEBHOOK', data: { order: { order_id: `order_${id}`, order_amount: 10 }, payment: { cf_payment_id: id } } });
   const cfSig = (ts: string, body: string, secret = CF_SECRET) =>
     createHmac('sha256', secret).update(ts + body).digest('base64');
   const cfReq = (body: string, headers: Record<string, string>) =>

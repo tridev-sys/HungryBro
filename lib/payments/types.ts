@@ -36,4 +36,20 @@ export interface PaymentProvider {
 
 export class WebhookSignatureError extends Error {}
 export class WebhookPayloadError extends Error {}
-export class PaymentCreateError extends Error {}
+/**
+ * A failed create call. `definite` is true only when the provider clearly refused the request and
+ * created no order (for example a 4xx answer, or a provider that is not configured). Timeouts, 5xx
+ * answers, network errors, and 2xx answers without an order id are ambiguous: the order may exist,
+ * so the router must not create a second one elsewhere.
+ */
+export class PaymentCreateError extends Error {
+  constructor(message: string, readonly definite: boolean = false) {
+    super(message);
+    this.name = 'PaymentCreateError';
+  }
+}
+
+/** HTTP status that proves the provider refused the create call (no order was made). */
+export function isDefiniteRefusal(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}

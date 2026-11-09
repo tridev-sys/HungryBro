@@ -53,28 +53,33 @@ test('recordWebhookEvent: first delivery is NEW, replay is DUPLICATE (Review Foc
   expect(await recordWebhookEvent(pool, 'razorpay', id)).toBe('DUPLICATE');
 });
 
+// Stale test body updated (owner review item 6, delivery flow): both routes now verify through the
+// provider adapter, which parses the provider's real event shape, so the bodies below match it.
+// The order id is unknown here, so a valid event is recorded and answered 200 with result UNKNOWN_ORDER.
 test('Razorpay route: forged 401, valid 200, replayed 409', async () => {
   const id = `evt_${randomUUID()}`;
+  const rzBody = JSON.stringify({ event: 'payment.captured', payload: { payment: { entity: { order_id: `order_${randomUUID()}`, amount: 71000 } } } });
   const mk = (sig: string) => new Request('http://localhost:3000/api/webhooks/razorpay', {
     method: 'POST',
     headers: { 'x-razorpay-signature': sig, 'x-razorpay-event-id': id, 'content-type': 'application/json' },
-    body,
+    body: rzBody,
   });
-  expect((await razorpayPost(mk(rzSig(body, 'forged')))).status).toBe(401);
-  expect((await razorpayPost(mk(rzSig(body)))).status).toBe(200);
-  expect((await razorpayPost(mk(rzSig(body)))).status).toBe(409);
+  expect((await razorpayPost(mk(rzSig(rzBody, 'forged')))).status).toBe(401);
+  expect((await razorpayPost(mk(rzSig(rzBody)))).status).toBe(200);
+  expect((await razorpayPost(mk(rzSig(rzBody)))).status).toBe(409);
 });
 
 // VERIFY AGAINST CURRENT DOCS BEFORE IMPLEMENTING: Cashfree header names and timestamp unit.
 test('Cashfree route: forged 401, valid 200, replayed 409', async () => {
   const ts = String(Date.now());
-  const sig = cfSig(ts, body);
+  const cfBody = JSON.stringify({ type: 'PAYMENT_SUCCESS_WEBHOOK', data: { order: { order_id: `order_${randomUUID()}`, order_amount: 710 }, payment: { cf_payment_id: randomUUID() } } });
+  const sig = cfSig(ts, cfBody);
   const mk = (s: string) => new Request('http://localhost:3000/api/webhooks/cashfree', {
     method: 'POST',
     headers: { 'x-webhook-timestamp': ts, 'x-webhook-signature': s, 'content-type': 'application/json' },
-    body,
+    body: cfBody,
   });
-  expect((await cashfreePost(mk(cfSig(ts, body, 'forged')))).status).toBe(401);
+  expect((await cashfreePost(mk(cfSig(ts, cfBody, 'forged')))).status).toBe(401);
   expect((await cashfreePost(mk(sig))).status).toBe(200);
   expect((await cashfreePost(mk(sig))).status).toBe(409);
 });

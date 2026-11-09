@@ -1,11 +1,15 @@
 import { createUpiIntentWithFallback } from '@/lib/payments/router';
 import { PaymentCreateError, type PaymentProvider, type UpiIntentRequest } from '@/lib/payments/types';
 
+// Stale tests updated (owner review item 5): a fallback now happens only on a definite refusal.
+// Timeouts, 5xx answers, and missing order ids are ambiguous and must not create a second order.
+
 const req: UpiIntentRequest = { orderRef: 'ord-9', amountInr: 500, description: 'Order' };
 
-function stub(name: 'razorpay' | 'cashfree', behavior: 'ok' | 'throw' | 'empty'): PaymentProvider & { create: ReturnType<typeof vi.fn> } {
+function stub(name: 'razorpay' | 'cashfree', behavior: 'ok' | 'throw' | 'timeout' | 'empty'): PaymentProvider & { create: ReturnType<typeof vi.fn> } {
   const create = vi.fn(async () => {
-    if (behavior === 'throw') throw new Error(`${name} 502`);
+    if (behavior === 'throw') throw new PaymentCreateError(`${name} refused (400)`, true);
+    if (behavior === 'timeout') throw new Error(`${name} request timed out`);
     if (behavior === 'empty') return { provider: name, providerOrderId: '', amountInr: 500, upiIntentUrl: 'upi://x' };
     return { provider: name, providerOrderId: `${name}-order`, amountInr: 500, upiIntentUrl: 'upi://x' };
   });
@@ -30,9 +34,16 @@ test('falls back to Cashfree exactly once when the Razorpay create call throws',
   expect(cf.create).toHaveBeenCalledTimes(1);
 });
 
-test('treats a Razorpay response without an order id as a failed create', async () => {
-  const out = await createUpiIntentWithFallback(stub('razorpay', 'empty'), stub('cashfree', 'ok'), req);
-  expect(out.provider).toBe('cashfree');
+test('a Razorpay response without an order id is ambiguous: no fallback, no second order', async () => {
+  const cf = stub('cashfree', 'ok');
+  await expect(createUpiIntentWithFallback(stub('razorpay', 'empty'), cf, req)).rejects.toThrow(/outcome unknown/);
+  expect(cf.create).not.toHaveBeenCalled();
+});
+
+test('a Razorpay timeout is ambiguous: no fallback to Cashfree (owner review item 5)', async () => {
+  const cf = stub('cashfree', 'ok');
+  await expect(createUpiIntentWithFallback(stub('razorpay', 'timeout'), cf, req)).rejects.toThrow(/outcome unknown/);
+  expect(cf.create).not.toHaveBeenCalled();
 });
 
 test('rejects with PaymentCreateError when both providers fail, without secrets in the message', async () => {

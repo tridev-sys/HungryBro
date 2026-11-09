@@ -17,7 +17,7 @@ function stub(name: 'razorpay' | 'cashfree', behaviour: 'ok' | 'throw' | 'no-id'
     name,
     async createUpiIntent(req) {
       calls.push(req);
-      if (behaviour === 'throw') throw new PaymentCreateError(`${name} down`);
+      if (behaviour === 'throw') throw new PaymentCreateError(`${name} refused (400)`, true);
       const intent: UpiIntent = {
         provider: name,
         providerOrderId: behaviour === 'no-id' ? '' : `${name}_${randomUUID()}`,
@@ -92,14 +92,20 @@ test('falls back to Cashfree only when Razorpay throws, and stores the provider 
   expect(cf.calls).toHaveLength(1);
 });
 
-test('falls back when Razorpay returns no order id; never creates a second order on Razorpay success', async () => {
+// Updated (owner review item 5): a 2xx answer without an order id is ambiguous. The order may exist at
+// Razorpay, so checkout must not fall back and must not store a row.
+test('a Razorpay answer without an order id is ambiguous: no fallback, no order row', async () => {
   const user = await diner();
+  const k = key();
   const rz = stub('razorpay', 'no-id');
   const cf = stub('cashfree');
   const r = await placeDeliveryOrder(await getPool(), user,
-    { ...cart([{ menuItemId: paneer, quantity: 1 }]), clientKey: key(), auctionId: null },
+    { ...cart([{ menuItemId: paneer, quantity: 1 }]), clientKey: k, auctionId: null },
     { primary: rz.provider, fallback: cf.provider });
-  expect(r.ok && r.provider).toBe('cashfree');
+  expect(r).toEqual({ ok: false, code: 'PAYMENT_UNAVAILABLE' });
+  expect(cf.calls).toHaveLength(0);
+  const { rowCount } = await admin.query('SELECT 1 FROM delivery_orders WHERE client_key = $1', [k]);
+  expect(rowCount).toBe(0);
 });
 
 test('no provider configured: 503-style PAYMENT_UNAVAILABLE and no order row', async () => {

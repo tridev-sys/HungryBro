@@ -44,3 +44,32 @@ export async function readJsonWithLimit(req: Request, limit: number = BODY_LIMIT
   }
   return JSON.parse(new TextDecoder().decode(buf));
 }
+
+/**
+ * Reads a raw text body (for signed webhooks: the signature is over these exact bytes), counting bytes
+ * so a chunked body with no Content-Length is also capped. Throws PayloadTooLargeError past `limit`.
+ */
+export async function readTextWithLimit(req: Request, limit: number = BODY_LIMIT_BYTES): Promise<string> {
+  enforceDeclaredLength(req.headers, limit);
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      throw new PayloadTooLargeError(limit);
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    buf.set(c, off);
+    off += c.byteLength;
+  }
+  return new TextDecoder().decode(buf);
+}
