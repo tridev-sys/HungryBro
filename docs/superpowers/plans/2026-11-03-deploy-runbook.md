@@ -18,6 +18,32 @@ Engineering decisions recorded here (not owner-facing):
 
 ---
 
+## Go-live deviations (2026-11-09, owner decisions)
+
+These decisions override the "Fixed decisions" above where they differ. Review dates are proposed by engineering; the owner confirms them.
+
+1. **Cloudflare SSL/TLS mode is Flexible** (not Full (strict)). Reason: set by the owner's boss; the owner may not change Cloudflare settings. Consequence: Cloudflare connects to the origin over plain HTTP on port 80. `proxy_server/Caddyfile` serves HTTP only for `hungrybro.pacewisdom.in` with no redirect to HTTPS (this removes the redirect loop). Visitor-to-Cloudflare traffic stays HTTPS. Cloudflare-to-origin traffic is unencrypted. The Origin CA certificate (A1, A3) is NOT used. Accepted risk, to review. Review date: 2026-11-23 (proposed).
+   - Note: the Flexible-mode Caddyfile is an uncommitted change in `/home/ubuntu/docker` (`M proxy_server/Caddyfile`). The committed version on `dev` still has the Full (strict) HTTPS block. Commit or revert it deliberately; do not deploy either version by accident.
+   - Note: section F2 (HTTP redirects to HTTPS) does not apply under Flexible mode. The HTTP site answers directly.
+2. **Header trust: port 443 is open to all.** Reason: the owner declined Cloudflare Authenticated Origin Pulls. Consequence: any client that reaches the origin directly can send a forged `CF-Connecting-IP`, which the app trusts for the client address. Review option: host UFW allowing 443 (and 80) only from Cloudflare IP ranges. Needs owner approval. Review date: 2026-11-23 (proposed).
+3. **Dev and prod share one environment and one database.** Reason: owner decision. Database `food_os` in container `food-os-db` holds both test and production data. Consequence: test data lives alongside production data. The test runner still uses a per-run database (`food_os_test_<runid>`) and never writes to `food_os`. Review date: 2026-11-23 (proposed).
+4. **Image is built locally** as `food-os-app:go-live`, not pulled from GHCR, for the first launch. Reason: first-launch decision. Consequence: `deploy.sh` and the GHCR pull path in E3 are not used for this launch. Review date: 2026-11-16 (proposed).
+5. **Sign-in codes use email OTP** (`OTP_PROVIDER=email`) through Brevo SMTP (free tier, about 300 emails a day). `SMTP_FROM` is the owner's verified address (tridev.g@pacewisdom.com) until a company domain sender is verified. Reason: owner decision. Consequence: daily sign-in volume is capped at about 300 emails; the sender is a personal address. Review date: 2026-11-16 (proposed).
+6. **AI key: `GEMINI_API_KEY` is used** (Gemini `gemini-2.5-flash`). Reason: owner decision. The Claude key is not set. Consequence: the LLM path is Gemini only until a Claude key is added. Review date: 2026-12-07 (proposed).
+7. **Backup login role `food_backup` does not exist yet.** Consequence: backups are not set up. The E1 bootstrap step for `003_backup_roles.sql` must be checked before relying on it. Review date: before real traffic.
+8. **Migrations present now go to 013** (`013_verified_email_claim.sql`), not 009 as listed in the project notes. This runbook is updated; `CLAUDE.md` is not changed by this section.
+9. **Internal secrets in the server `.env` were generated on 2026-11-09** by engineering with owner approval. Values are not recorded anywhere in this repo or in this file. Names only: `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `BACKUP_DB_PASSWORD`, `FOOD_ADMIN_DB_PASSWORD`, `POS_CREDENTIALS_KEY`, `AUTH_JWT_SECRET`, `OTP_HMAC_KEY`, `TOTP_ENCRYPTION_KEY`, `GEMINI_API_KEY`, `SMTP_*`, `OTP_PROVIDER`.
+
+### Before real traffic (checklist)
+
+- [ ] Header trust decision recorded by the owner (deviation 2): accept as is, or approve host UFW limited to Cloudflare ranges.
+- [ ] Flexible-mode risk reviewed (deviation 1): owner accepts unencrypted Cloudflare-to-origin traffic, or Cloudflare mode is changed by whoever controls it.
+- [ ] Company domain sender verified for `SMTP_FROM` (deviation 5). Until then, the sender is the owner's personal address.
+- [ ] Backup role `food_backup` created and tested (deviation 7).
+- [ ] Off-host backup decision made. Backups currently stay on the root disk (`/home/ubuntu/docker/backups-scratch`), which is not off-host.
+
+---
+
 ## Phase A. Certificate and network (OWNER)
 
 ### A1. OWNER: create the origin certificate (Cloudflare dashboard)
