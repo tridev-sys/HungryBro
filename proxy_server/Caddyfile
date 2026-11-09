@@ -1,9 +1,9 @@
-# Shared proxy. Domain hungrybro.pacewisdom.in is proxied by Cloudflare (orange cloud, SSL/TLS mode Full (strict)).
-# TLS uses the Cloudflare Origin CA certificate that the owner places on the host at /etc/caddy/origin
-# (mounted read-only into this container). No automatic certificates: Let's Encrypt HTTP challenges fail
-# behind the Cloudflare proxy.
-hungrybro.pacewisdom.in {
-	tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem
+# Shared proxy. Domain hungrybro.pacewisdom.in is proxied by Cloudflare.
+# Cloudflare SSL mode is Flexible (set by the owner's boss; not changed here). Cloudflare therefore
+# connects to this server over plain HTTP on port 80. This site serves HTTP only, with no redirect,
+# which removes the redirect loop. Visitor-to-Cloudflare traffic stays HTTPS.
+# RISK (accepted by the owner, to be reviewed): Cloudflare-to-server traffic is unencrypted.
+http://hungrybro.pacewisdom.in {
 	encode zstd gzip
 	# Cloudflare sets CF-Connecting-IP to the real client address. Caddy overwrites X-Real-IP with it.
 	reverse_proxy food-os-app:3000 {
@@ -15,9 +15,4 @@ hungrybro.pacewisdom.in {
 	log {
 		output stdout
 	}
-}
-
-# Plain HTTP only redirects to HTTPS.
-http://hungrybro.pacewisdom.in {
-	redir https://hungrybro.pacewisdom.in{uri} permanent
 }

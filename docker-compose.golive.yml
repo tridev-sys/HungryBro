@@ -1,0 +1,53 @@
+# Go-live override for the app container on this host (not GHCR).
+# Run as:
+#   docker compose -f docker-compose.yml -f docker-compose.golive.yml up -d --no-deps app
+# --no-deps keeps the one-shot `migrate` service from running. Migrations 001 to 009 are already
+# applied in food_os (checked 2026-11-09).
+# No secret values in this file. Values are interpolated by Compose from the host .env at run time.
+# The app container gets only the names listed below. ADMIN_DATABASE_URL and the other owner-only
+# names are deliberately not passed (the app must never hold the owner login).
+
+services:
+  app:
+    image: food-os-app:dev-2026-11-09
+    build: !reset null
+    container_name: food-os-app
+    user: "10001:10001"
+    restart: unless-stopped
+    expose:
+      - "3000"
+    ports: !reset []
+    networks: !override
+      - shared
+      - backend
+    environment:
+      NODE_ENV: production
+      APP_DATABASE_URL: postgres://food_app_login:${APP_DB_PASSWORD:?set APP_DB_PASSWORD}@food-os-db:5432/food_os
+      REDIS_URL: redis://food-os-redis:6379
+      POS_PROVIDERS_ENABLED: ${POS_PROVIDERS_ENABLED:-}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?set AUTH_JWT_SECRET}
+      OTP_HMAC_KEY: ${OTP_HMAC_KEY:?set OTP_HMAC_KEY}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?set TOTP_ENCRYPTION_KEY}
+      POS_CREDENTIALS_KEY: ${POS_CREDENTIALS_KEY:?set POS_CREDENTIALS_KEY}
+      OTP_PROVIDER: ${OTP_PROVIDER:?set OTP_PROVIDER}
+      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:?set SMTP_PORT}
+      SMTP_USER: ${SMTP_USER:?set SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS:?set SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM:?set SMTP_FROM}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    cpus: 1.5
+    mem_limit: 1g
+    mem_reservation: 512m
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
