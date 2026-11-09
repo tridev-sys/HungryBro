@@ -5,6 +5,9 @@ import type { OtpProvider } from './otp-providers';
 import { lookupUserByPhone, lookupUserByEmail, lookupUserById, createUserAfterOtp, createUserAfterEmailOtp } from './sign-in';
 import { issueSession, readPendingSecondFactor, issuePendingSecondFactor } from './session';
 import { isTotpEnabled, verifySecondFactor } from './totp';
+import { clearSecondFactorAttempts, reserveSecondFactorAttempt } from './second-factor-lock';
+import type { RedisLike } from '@/lib/ratelimit/redis-store';
+import { getRedis } from '@/lib/redis';
 
 // No next/* imports here, so the logic runs in Node tests.
 
@@ -53,6 +56,7 @@ export function otpStepFor(rawIdentifier: string, error?: string): LoginState {
 
 const TOTP_ERROR = 'That code is not right.';
 const PENDING_ERROR = 'Your sign-in has expired. Start again.';
+const LOCKED_ERROR = 'Too many incorrect codes. Try again later.';
 
 export type CompleteLoginResult =
   | { ok: true; token: string; maxAgeSeconds: number; userId: string; role: UserRole }
@@ -81,11 +85,16 @@ export async function completeLogin(
   return { ok: true, token, maxAgeSeconds, userId: user.id, role: user.role };
 }
 
-/** Step 2 (only when 2FA is enabled): an authenticator code or a single-use recovery code. */
+/**
+ * Step 2 (only when 2FA is enabled): an authenticator code or a single-use recovery code.
+ * At most SECOND_FACTOR_MAX_ATTEMPTS checks per user in each window. Once that is used up, even the
+ * right code is refused until the window ends. The attempt is reserved before the code is checked.
+ */
 export async function completeTotpLogin(
   pool: pg.Pool,
   pendingToken: string,
   code: string,
+  redis: RedisLike = getRedis(),
 ): Promise<
   | { ok: true; token: string; maxAgeSeconds: number; userId: string; role: UserRole }
   | { ok: false; error: string }
@@ -93,8 +102,10 @@ export async function completeTotpLogin(
   const userId = await readPendingSecondFactor(pendingToken);
   if (!userId) return { ok: false, error: PENDING_ERROR };
 
+  if (!(await reserveSecondFactorAttempt(redis, userId))) return { ok: false, error: LOCKED_ERROR };
   const factor = await verifySecondFactor(pool, userId, code);
   if (!factor.ok) return { ok: false, error: TOTP_ERROR };
+  await clearSecondFactorAttempts(redis, userId);
 
   const user = await lookupUserById(pool, userId);
   if (!user) return { ok: false, error: PENDING_ERROR };
