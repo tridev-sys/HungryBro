@@ -114,7 +114,7 @@ test('checkout providers built from keys are the real adapters, never the fake',
     RAZORPAY_KEY_ID: 'rzp_test_x', RAZORPAY_KEY_SECRET: 'x', RAZORPAY_WEBHOOK_SECRET: 'y',
     CASHFREE_CLIENT_ID: 'c', CASHFREE_CLIENT_SECRET: 'c', CASHFREE_WEBHOOK_SECRET: 'd',
     PAYMENT_MERCHANT_VPA: 'merchant@okaxis', PAYMENT_PAYEE_NAME: 'Food',
-  } as NodeJS.ProcessEnv;
+  } as unknown as NodeJS.ProcessEnv;
   const p = checkoutProvidersFromEnv(env);
   expect(p!.primary).toBeInstanceOf(RazorpayProvider);
   expect(p!.fallback).toBeInstanceOf(CashfreeProvider);
