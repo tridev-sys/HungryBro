@@ -33,15 +33,15 @@ tracks the order, and rates it after delivery.
 | 1 | `/order` (restaurant list, server component) | GET page | `restaurant_nodes` (public read), `is_accepting_delivery` |
 | 2 | `/order/[restaurantId]` (menu page + client `MenuCart`) | GET page | `restaurant_nodes`, `menu_items`, `menu_categories` |
 | 3 | `/order/cart` (client; cart in `localStorage` key `fos-cart-v1`) | client only | none; server revalidates at checkout |
-| 4 | `/order/checkout` (client) then `POST /api/orders` | POST | `delivery_orders`, `delivery_order_lines` (new, 014); `menu_items` for prices; `mesh_food_auctions` id from `POST /api/delivery/intent` |
+| 4 | `/order/checkout` (client) then `POST /api/orders` | POST | `delivery_orders`, `delivery_order_lines` (new, 015); `menu_items` for prices; `mesh_food_auctions` id from `POST /api/delivery/intent` |
 | 4 | `POST /api/delivery/intent` (existing) | POST | `mesh_food_auctions` |
-| 5 | `POST /api/webhooks/razorpay` (extended) | POST | `webhook_events`, `delivery_orders` via `app_apply_payment_event` (014) |
+| 5 | `POST /api/webhooks/razorpay` (extended) | POST | `webhook_events`, `delivery_orders` via `app_apply_payment_event` (015) |
 | 6 | `/order/[orderId]` (client poll every 5 s) + `GET /api/orders/[orderId]` | GET | `delivery_orders` (diner RLS) |
 | 7 | rating panel on `/order/[orderId]` + existing `POST /api/ratings` | POST | `verified_customer_ratings`, `order_refs` |
 | 8 | `/` signed-in home and signed-out home; `POST /api/auth/sign-out` | GET/POST | `users` via `resolveActor` |
 | 8 | `/profile/settings` (existing) | GET | existing |
 
-Delivered-state transition: `app_mark_delivery_delivered(order_id)` (014), callable by
+Delivered-state transition: `app_mark_delivery_delivered(order_id)` (015), callable by
 `restaurant_staff`, `kitchen_lead`, `delivery_agent` of that restaurant, or `platform_admin`. It
 creates the `order_refs` row (status `completed`, `settled_at = now()`) and links it to the order.
 There is no staff UI for this in this branch. It is covered by DB tests and the e2e helper.
@@ -50,11 +50,11 @@ There is no staff UI for this in this branch. It is covered by DB tests and the 
 
 - Existing: `restaurant_nodes`, `menu_items`, `menu_categories`, `users`, `order_refs`,
   `verified_customer_ratings`, `webhook_events`, `mesh_food_auctions`.
-- New (migration 014): `delivery_orders`, `delivery_order_lines`.
+- New (migration 015): `delivery_orders`, `delivery_order_lines`.
 
-## Migration 014 (new, append-only)
+## Migration 015 (new, append-only)
 
-File: `db/migrations/014_delivery_orders.sql`. Runs as food_admin.
+File: `db/migrations/015_delivery_orders.sql`. Runs as food_admin.
 
 - `delivery_orders`: `id`, `restaurant_id`, `diner_user_id`, `auction_id NULL` (FK to
   `mesh_food_auctions`), `status` CHECK in (`pending_payment`, `paid`, `in_kitchen`, `delivered`,
@@ -82,7 +82,7 @@ File: `db/migrations/014_delivery_orders.sql`. Runs as food_admin.
 2. Menu page. `formatINR` amount tests (`₹1,22,500.00`), quantity add/remove component test.
 3. Cart. Pure `cart.ts` (add, remove, totals with round2); server `priceCart(pool, restaurantId, lines)`
    reads prices from the DB and rejects unknown or out-of-stock items.
-4. Checkout. Migration 014. `POST /api/orders` with stand-in providers injected. Razorpay primary,
+4. Checkout. Migration 015. `POST /api/orders` with stand-in providers injected. Razorpay primary,
    Cashfree fallback through `createUpiIntentWithFallback`. No live API call.
 5. Webhook path. `app_apply_payment_event` after HMAC. Tests: bad signature → no state change;
    duplicate event → no second change; amount mismatch → no `paid`.

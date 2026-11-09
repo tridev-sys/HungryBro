@@ -1,4 +1,4 @@
--- 014_delivery_orders.sql: customer delivery orders, payment state, and delivered settlement.
+-- 015_delivery_orders.sql: customer delivery orders, payment state, and delivered settlement.
 -- Append-only: 001 to 013 are not edited. Runs as food_admin (owner of the objects below).
 --
 -- Rules:
