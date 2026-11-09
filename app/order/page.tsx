@@ -16,7 +16,7 @@ export default async function OrderPage() {
           {restaurants.map((r) => (
             <li key={r.id}>
               <Link
-                href={`/order/${r.id}`}
+                href={`/order/restaurant/${r.id}`}
                 className="block rounded-card bg-surface p-4 hover:bg-surface-2"
               >
                 <span className="block text-lg font-medium">{r.name}</span>
