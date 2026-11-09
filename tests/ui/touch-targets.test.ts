@@ -160,6 +160,7 @@ const AUDITED_CONTROLS: Record<string, number> = {
   'components/order/CheckoutView.tsx': 1,
   'components/order/MenuList.tsx': 2,
   'components/order/OrderStatus.tsx': 1,
+  'components/order/RatingPanel.tsx': 1,
   'components/ratings/RatingModal.tsx': 5,
   'components/ui/ActionBar.tsx': 2,
   'components/ui/AppShell.tsx': 2,

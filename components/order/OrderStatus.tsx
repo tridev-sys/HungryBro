@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { formatINR } from '@/lib/ui/format';
 import type { OrderStatusView } from '@/lib/delivery-customer/order-status';
+import { RatingPanel } from './RatingPanel';
 
 const POLL_MS = 5000;
 const FINAL = new Set(['delivered', 'cancelled']);
@@ -52,6 +53,7 @@ export function OrderStatus({ initial }: { initial: OrderStatusView }) {
           Pay with UPI
         </a>
       ) : null}
+      <RatingPanel orderRefId={view.orderRefId} status={view.status} rated={view.rated} />
     </div>
   );
 }
