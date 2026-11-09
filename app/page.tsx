@@ -15,12 +15,6 @@ export default function Home() {
           >
             Order delivery
           </a>
-          <a
-            href="/dine"
-            className="flex min-h-11 w-full items-center justify-center rounded-[var(--radius-pill)] bg-[var(--color-accent)] px-4 py-3 text-base font-semibold text-[var(--color-accent-ink)]"
-          >
-            Dine in
-          </a>
         </div>
       </section>
 
